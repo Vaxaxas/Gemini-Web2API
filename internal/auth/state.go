@@ -60,7 +60,9 @@ type LoadedAccount struct {
 	ProxyURL string
 	Source   gemini.AccountSource
 	OAuth    *OAuthMaterial
-	// Profile 为 Chrome 导入的 Profile 目录名，Cookie Header 导入时为空
+	// Browser 为导入该账号的浏览器名称，如 chrome、brave、edge、firefox，Cookie Header 导入时为空
+	Browser string
+	// Profile 为浏览器导入的 Profile 目录名，Cookie Header 导入时为空
 	Profile  string
 	Disabled bool
 	File     *File
@@ -211,7 +213,7 @@ func (f *File) Account() LoadedAccount {
 	source.Save = f.SaveCookies
 	return LoadedAccount{
 		ID: source.ID, ProxyURL: proxyURL, Source: source,
-		OAuth: f.state.Metadata.OAuth, Profile: f.state.Metadata.Source.Profile,
+		OAuth: f.state.Metadata.OAuth, Browser: f.state.Metadata.Source.Browser, Profile: f.state.Metadata.Source.Profile,
 		Disabled: f.state.Metadata.Disabled, File: f,
 	}
 }

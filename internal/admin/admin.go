@@ -62,6 +62,8 @@ func Mount(router *gin.Engine, deps Deps) {
 	api.POST("/accounts/:id/verify", h.verifyAccount)
 	api.GET("/accounts/import/chrome", h.chromeProfiles)
 	api.POST("/accounts/import/chrome", h.importChrome)
+	api.GET("/accounts/import/browser", h.browserProfiles)
+	api.POST("/accounts/import/browser", h.importBrowser)
 	api.POST("/accounts/import/cookie", h.importCookie)
 	api.POST("/pairing", h.createPairing)
 	api.GET("/accounts/usage", func(c *gin.Context) {

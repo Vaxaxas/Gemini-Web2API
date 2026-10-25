@@ -3,19 +3,39 @@
 package chromeauth
 
 import (
+	"cmp"
+	"crypto/aes"
+	"crypto/cipher"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode"
+	"unsafe"
 
+	"github.com/Mag1cFall/Gemini-Web2API/internal/auth"
+	"golang.org/x/sys/windows"
 	_ "modernc.org/sqlite"
+)
+
+type dataBlob struct {
+	cbData uint32
+	pbData *byte
+}
+
+var (
+	kernel32           = windows.NewLazySystemDLL("kernel32.dll")
+	crypt32            = windows.NewLazySystemDLL("crypt32.dll")
+	procCryptUnprotect = crypt32.NewProc("CryptUnprotectData")
+	procLocalFree      = kernel32.NewProc("LocalFree")
 )
 
 // DefaultChromeRoot 返回本机 Chrome User Data 目录
@@ -27,14 +47,313 @@ func DefaultChromeRoot() (string, error) {
 	return filepath.Join(localAppData, "Google", "Chrome", "User Data"), nil
 }
 
+// DefaultBraveRoot 返回本机 Brave User Data 目录
+func DefaultBraveRoot() (string, error) {
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if localAppData == "" {
+		return "", fmt.Errorf("环境变量 LOCALAPPDATA 为空")
+	}
+	return filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"), nil
+}
+
+// DefaultEdgeRoot 返回本机 Edge User Data 目录
+func DefaultEdgeRoot() (string, error) {
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if localAppData == "" {
+		return "", fmt.Errorf("环境变量 LOCALAPPDATA 为空")
+	}
+	return filepath.Join(localAppData, "Microsoft", "Edge", "User Data"), nil
+}
+
+// DefaultFirefoxRoot 返回本机 Firefox 目录
+func DefaultFirefoxRoot() (string, error) {
+	appData := strings.TrimSpace(os.Getenv("APPDATA"))
+	if appData == "" {
+		return "", fmt.Errorf("环境变量 APPDATA 为空")
+	}
+	return filepath.Join(appData, "Mozilla", "Firefox"), nil
+}
+
+// DefaultBrowserRoot 根据浏览器类型返回默认根目录
+func DefaultBrowserRoot(browser string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(browser)) {
+	case BrowserChrome, "":
+		return DefaultChromeRoot()
+	case BrowserBrave:
+		return DefaultBraveRoot()
+	case BrowserEdge:
+		return DefaultEdgeRoot()
+	case BrowserFirefox:
+		return DefaultFirefoxRoot()
+	default:
+		return "", fmt.Errorf("不支持的浏览器: %s", browser)
+	}
+}
+
 func ensurePlatformImport() error {
 	return nil
 }
 
-func discoverPlatform(chromeRoot string) ([]Account, error) {
-	data, err := os.ReadFile(filepath.Join(chromeRoot, "Local State"))
+func isSharingViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) && (errno == 32 || errno == windows.ERROR_SHARING_VIOLATION || errno == windows.ERROR_LOCK_VIOLATION) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "used by another process") || strings.Contains(msg, "sharing violation") || strings.Contains(msg, "lock violation")
+}
+
+func decryptDPAPIMasterKey(root string) ([]byte, error) {
+	data, err := os.ReadFile(filepath.Join(root, "Local State"))
 	if err != nil {
-		return nil, fmt.Errorf("读取 Chrome Local State: %w", err)
+		return nil, fmt.Errorf("读取 Local State: %w", err)
+	}
+	var state struct {
+		OSCrypt struct {
+			EncryptedKey string `json:"encrypted_key"`
+		} `json:"os_crypt"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("解析 Local State: %w", err)
+	}
+	raw := strings.TrimSpace(state.OSCrypt.EncryptedKey)
+	if raw == "" {
+		return nil, fmt.Errorf("Local State 缺少 encrypted_key")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("解析 encrypted_key: %w", err)
+	}
+	const dpapiPrefix = "DPAPI"
+	if len(decoded) <= len(dpapiPrefix) || string(decoded[:len(dpapiPrefix)]) != dpapiPrefix {
+		return nil, fmt.Errorf("encrypted_key 缺少 DPAPI 前缀")
+	}
+	cipher := decoded[len(dpapiPrefix):]
+	var inBlob, outBlob dataBlob
+	inBlob.cbData = uint32(len(cipher))
+	inBlob.pbData = &cipher[0]
+	r, _, callErr := procCryptUnprotect.Call(
+		uintptr(unsafe.Pointer(&inBlob)),
+		0,
+		0,
+		0,
+		0,
+		0,
+		uintptr(unsafe.Pointer(&outBlob)),
+	)
+	if r == 0 {
+		return nil, fmt.Errorf("CryptUnprotectData 失败: %w", callErr)
+	}
+	defer procLocalFree.Call(uintptr(unsafe.Pointer(outBlob.pbData)))
+	key := make([]byte, outBlob.cbData)
+	copy(key, unsafe.Slice(outBlob.pbData, outBlob.cbData))
+	if len(key) != 32 {
+		return nil, fmt.Errorf("DPAPI 密钥长度异常 (%d)", len(key))
+	}
+	return key, nil
+}
+
+func retrieveMasterKey(browser string, root string) ([]byte, error) {
+	// 优先尝试 v20 App-Bound 密钥（Chrome 127+ 及现代 Chromium 核心默认启用）
+	v20Key, v20Err := retrieveV20KeyForBrowser(browser, root)
+	if v20Err == nil && len(v20Key) == 32 {
+		return v20Key, nil
+	}
+	// 其次尝试 DPAPI 密钥（Brave 或未启用 ABE 的 Chromium 核心）
+	dpapiMasterKey, dpapiErr := decryptDPAPIMasterKey(root)
+	if dpapiErr == nil && len(dpapiMasterKey) == 32 {
+		return dpapiMasterKey, nil
+	}
+	if v20Err != nil {
+		return nil, fmt.Errorf("解密 %s 主密钥失败 (ABE: %v, DPAPI: %v)", browser, v20Err, dpapiErr)
+	}
+	return nil, fmt.Errorf("解密 %s 主密钥失败: %w", browser, dpapiErr)
+}
+
+func openChromiumCookies(root string, profile string) (*sql.DB, func(), error) {
+	tempDir, err := os.MkdirTemp("", "gemini-web2api-cookies-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("创建 Cookie 临时目录: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(tempDir)
+		}
+	}()
+	cookiePath := filepath.Join(root, profile, "Network", "Cookies")
+	if _, statErr := os.Stat(cookiePath); statErr != nil {
+		cookiePath = filepath.Join(root, profile, "Cookies")
+		if _, statErr2 := os.Stat(cookiePath); statErr2 != nil {
+			return nil, nil, fmt.Errorf("未找到 Cookie 数据库: %w", statErr2)
+		}
+	}
+	copyPath := filepath.Join(tempDir, "Cookies")
+	if err = copyFile(cookiePath, copyPath); err != nil {
+		if isSharingViolation(err) {
+			return nil, nil, fmt.Errorf("%w: %s", errBrowserRunning, err.Error())
+		}
+		return nil, nil, fmt.Errorf("复制 %s Cookies: %w", profile, err)
+	}
+	if err = copyFile(cookiePath+"-wal", copyPath+"-wal"); err != nil && !os.IsNotExist(err) && !isSharingViolation(err) {
+		return nil, nil, fmt.Errorf("复制 %s Cookies-wal: %w", profile, err)
+	}
+	uri := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(copyPath), RawQuery: "mode=ro"}
+	database, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		return nil, nil, fmt.Errorf("打开 %s Cookies: %w", profile, err)
+	}
+	database.SetMaxOpenConns(1)
+	return database, func() {
+		database.Close()
+		os.RemoveAll(tempDir)
+	}, nil
+}
+
+func checkChromiumCookies(root string, profile string) (hasCookies bool, isLocked bool, err error) {
+	database, closeDatabase, err := openChromiumCookies(root, profile)
+	if err != nil {
+		if errors.Is(err, errBrowserRunning) || isSharingViolation(err) {
+			return false, true, nil
+		}
+		return false, false, err
+	}
+	defer closeDatabase()
+
+	rows, err := database.Query("SELECT name FROM cookies WHERE host_key LIKE '%google.com'")
+	if err != nil {
+		return false, false, err
+	}
+	defer rows.Close()
+
+	names := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err == nil {
+			names[name] = true
+		}
+	}
+	return names["SAPISID"] && names["__Secure-1PSID"], false, nil
+}
+
+func readChromiumCookies(root string, profile string, masterKey []byte) ([]auth.StateCookie, error) {
+	dpapiKey, _ := decryptDPAPIMasterKey(root)
+
+	database, closeDatabase, err := openChromiumCookies(root, profile)
+	if err != nil {
+		return nil, err
+	}
+	defer closeDatabase()
+
+	rows, err := database.Query("SELECT name, encrypted_value, host_key, path, expires_utc, is_secure, is_httponly, samesite FROM cookies WHERE host_key LIKE '%google.com'")
+	if err != nil {
+		return nil, fmt.Errorf("读取 %s cookies: %w", profile, err)
+	}
+	defer rows.Close()
+
+	var cookies []auth.StateCookie
+	for rows.Next() {
+		var name, hostKey, path string
+		var encrypted []byte
+		var expiresUtc int64
+		var isSecure, isHttpOnly, samesite int
+		if err := rows.Scan(&name, &encrypted, &hostKey, &path, &expiresUtc, &isSecure, &isHttpOnly, &samesite); err != nil {
+			return nil, fmt.Errorf("解析 %s cookies: %w", profile, err)
+		}
+		if name == "" || len(encrypted) == 0 {
+			continue
+		}
+
+		val := ""
+		if len(encrypted) >= 3+12+16 {
+			ver := string(encrypted[:3])
+			var key []byte
+			if ver == "v20" {
+				key = masterKey
+			} else if ver == "v10" {
+				if len(dpapiKey) == 32 {
+					key = dpapiKey
+				} else {
+					key = masterKey
+				}
+			}
+			if len(key) == 32 {
+				block, err := aes.NewCipher(key)
+				if err == nil {
+					gcm, err := cipher.NewGCM(block)
+					if err == nil {
+						plain, err := gcm.Open(nil, encrypted[3:15], encrypted[15:], nil)
+						if err == nil {
+							val = string(plain)
+						}
+					}
+				}
+			}
+		}
+		if val == "" {
+			continue
+		}
+
+		expiresUnix := float64(0)
+		if expiresUtc > 11644473600000000 {
+			expiresUnix = float64((expiresUtc - 11644473600000000) / 1000000)
+		}
+		sameSiteStr := ""
+		switch samesite {
+		case 1:
+			sameSiteStr = "Lax"
+		case 2:
+			sameSiteStr = "Strict"
+		}
+		cookies = append(cookies, auth.StateCookie{
+			Name:     name,
+			Value:    val,
+			Domain:   hostKey,
+			Path:     path,
+			Expires:  expiresUnix,
+			Secure:   isSecure != 0,
+			HTTPOnly: isHttpOnly != 0,
+			SameSite: sameSiteStr,
+		})
+	}
+	names := make(map[string]bool)
+	for _, c := range cookies {
+		names[c.Name] = true
+	}
+	if !names["SAPISID"] || !names["__Secure-1PSID"] {
+		return nil, fmt.Errorf("%s 缺少核心 Google Cookie (SAPISID/__Secure-1PSID)", profile)
+	}
+	return cookies, nil
+}
+
+func discoverPlatformBrowser(browser string, root string) ([]Account, error) {
+	browser = strings.ToLower(strings.TrimSpace(browser))
+	if browser == "" {
+		browser = BrowserChrome
+	}
+	if root == "" {
+		var err error
+		root, err = DefaultBrowserRoot(browser)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if browser == BrowserFirefox {
+		return discoverFirefox(root)
+	}
+	return discoverChromium(browser, root)
+}
+
+func discoverPlatform(chromeRoot string) ([]Account, error) {
+	return discoverChromium(BrowserChrome, chromeRoot)
+}
+
+func discoverChromium(browser string, root string) ([]Account, error) {
+	data, err := os.ReadFile(filepath.Join(root, "Local State"))
+	if err != nil {
+		return nil, fmt.Errorf("读取 %s Local State: %w", browser, err)
 	}
 	var state struct {
 		Profile struct {
@@ -45,10 +364,10 @@ func discoverPlatform(chromeRoot string) ([]Account, error) {
 		} `json:"profile"`
 	}
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("解析 Chrome Local State: %w", err)
+		return nil, fmt.Errorf("解析 %s Local State: %w", browser, err)
 	}
 	if state.Profile.InfoCache == nil {
-		return nil, fmt.Errorf("Chrome Local State 缺少 profile.info_cache")
+		return nil, fmt.Errorf("%s Local State 缺少 profile.info_cache", browser)
 	}
 
 	profiles := make([]string, 0, len(state.Profile.InfoCache))
@@ -61,29 +380,56 @@ func discoverPlatform(chromeRoot string) ([]Account, error) {
 	accounts := make([]Account, 0, len(profiles))
 	for _, profile := range profiles {
 		info := state.Profile.InfoCache[profile]
-		identities, err := profileIdentities(chromeRoot, profile)
-		if err != nil || len(identities) == 0 {
-			accounts = append(accounts, Account{Profile: profile, DisplayName: info.Name, Email: info.UserName})
-			continue
+		identities, err := profileIdentities(root, profile)
+		if err == nil && len(identities) > 0 {
+			records, recordsErr := readTokenServices(root, profile)
+			seen := make(map[string]bool, len(identities))
+			for _, identity := range identities {
+				if identity.GaiaID == "" || seen[identity.GaiaID] {
+					continue
+				}
+				seen[identity.GaiaID] = true
+				record, found := records[identity.GaiaID]
+				account := Account{
+					Browser:     browser,
+					Profile:     profile,
+					GaiaID:      identity.GaiaID,
+					DisplayName: info.Name,
+					Email:       identity.Email,
+					SourceType:  "oauth",
+				}
+				switch {
+				case recordsErr != nil:
+					account.Reason = ReasonReadFailed
+				case found && !strings.HasPrefix(string(record.encryptedToken), "v20") && !strings.HasPrefix(string(record.encryptedToken), "v10"):
+					account.Reason = ReasonNeedsReauth
+				default:
+					account.Importable = found
+				}
+				accounts = append(accounts, account)
+			}
 		}
-		records, recordsErr := readTokenServices(chromeRoot, profile)
-		seen := make(map[string]bool, len(identities))
-		for _, identity := range identities {
-			if identity.GaiaID == "" || seen[identity.GaiaID] {
-				continue
+
+		if len(identities) == 0 {
+			hasCoreCookies, isLocked, cookieErr := checkChromiumCookies(root, profile)
+			acc := Account{
+				Browser:     browser,
+				Profile:     profile,
+				DisplayName: info.Name,
+				Email:       cmp.Or(info.UserName, profile),
 			}
-			seen[identity.GaiaID] = true
-			record, found := records[identity.GaiaID]
-			account := Account{Profile: profile, GaiaID: identity.GaiaID, DisplayName: info.Name, Email: identity.Email}
 			switch {
-			case recordsErr != nil:
-				account.Reason = ReasonReadFailed
-			case found && !strings.HasPrefix(string(record.encryptedToken), "v20"):
-				account.Reason = ReasonNeedsReauth
+			case isLocked:
+				acc.Reason = ReasonBrowserRunning
+			case hasCoreCookies:
+				acc.Importable = true
+				acc.SourceType = "cookie"
+			case cookieErr != nil:
+				acc.Reason = ReasonReadFailed
 			default:
-				account.Importable = found
+				acc.Reason = "not_signed_in"
 			}
-			accounts = append(accounts, account)
+			accounts = append(accounts, acc)
 		}
 	}
 	return accounts, nil
@@ -108,22 +454,6 @@ func profileIdentities(chromeRoot string, profile string) ([]profileIdentity, er
 		return nil, fmt.Errorf("解析 %s Preferences: %w", profile, err)
 	}
 	return preferences.Accounts, nil
-}
-
-// copyFile 把 src 复制为 dst
-func copyFile(src string, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
 }
 
 // openWebData 把 Profile 的 Web Data 与其 WAL 日志复制到临时目录后只读打开，绕过运行中 Chrome 的排他锁并包含尚未检查点的写入

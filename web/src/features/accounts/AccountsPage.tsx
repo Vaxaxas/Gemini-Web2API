@@ -276,7 +276,17 @@ export function AccountsPage() {
                   <Td>
                     <Badge tone={stateTone(account.state)}>{sm[account.state]}</Badge>
                   </Td>
-                  <Td>{account.source === 'chrome' ? m.sourceChrome : m.sourceCookie}</Td>
+                  <Td>
+                    {account.source === 'chrome'
+                      ? m.sourceChrome
+                      : account.source === 'brave'
+                        ? m.sourceBrave
+                        : account.source === 'edge'
+                          ? m.sourceEdge
+                          : account.source === 'firefox'
+                            ? m.sourceFirefox
+                            : m.sourceCookie}
+                  </Td>
                   <Td>{account.tier ?? m.none}</Td>
                   <Td className="text-right">{account.models.length}</Td>
                   <Td className="text-right tabular-nums">

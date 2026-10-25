@@ -214,10 +214,13 @@ func (m *Manager) Add(account auth.LoadedAccount) error {
 func (m *Manager) launch(account auth.LoadedAccount, firstDone func()) {
 	proxy, source := m.accountProxy(account)
 	account.ProxyURL = proxy
-	info := balancer.AccountInfo{Source: "cookie", Profile: account.Profile, Proxy: proxy, ProxySource: source}
-	if account.OAuth != nil {
-		info.Source = "chrome"
+	accountSource := "cookie"
+	if account.Browser != "" {
+		accountSource = account.Browser
+	} else if account.OAuth != nil {
+		accountSource = "chrome"
 	}
+	info := balancer.AccountInfo{Source: accountSource, Profile: account.Profile, Proxy: proxy, ProxySource: source}
 	if account.File != nil {
 		info.Path = account.File.Path()
 	}
@@ -587,42 +590,88 @@ func (m *Manager) IDs() []string {
 	return append([]string(nil), m.order...)
 }
 
-// ChromeAccounts 列出本机 Chrome 中可导入的账号，并标出已导入的账号
-func (m *Manager) ChromeAccounts() ([]ChromeAccount, error) {
-	root, err := chromeauth.DefaultChromeRoot()
+// BrowserAccounts 列出本机指定浏览器中可导入的账号，并标出已导入的账号
+func (m *Manager) BrowserAccounts(browser string) ([]BrowserAccount, error) {
+	if browser == "" {
+		browser = chromeauth.BrowserChrome
+	}
+	root, err := chromeauth.DefaultBrowserRoot(browser)
 	if err != nil {
 		return nil, err
 	}
-	discovered, err := chromeauth.Discover(root)
+	discovered, err := chromeauth.DiscoverBrowser(browser, root)
 	if err != nil {
 		return nil, err
 	}
-	imported := make(map[string]bool)
-	for _, id := range m.IDs() {
-		imported[id] = true
+	importedIDs := make(map[string]bool)
+	importedProfiles := make(map[string]bool)
+	m.mu.Lock()
+	for id, entry := range m.accounts {
+		importedIDs[id] = true
+		if client := m.pool.Client(id); client != nil && client.Email() != "" {
+			importedIDs[chromeauth.AccountID(client.Email())] = true
+		}
+		if entry != nil {
+			b := entry.account.Browser
+			if b == "" && entry.account.OAuth != nil {
+				b = chromeauth.BrowserChrome
+			}
+			if b != "" && entry.account.Profile != "" {
+				importedProfiles[b+"/"+strings.ToLower(entry.account.Profile)] = true
+			}
+		}
 	}
-	result := make([]ChromeAccount, 0, len(discovered))
+	m.mu.Unlock()
+
+	result := make([]BrowserAccount, 0, len(discovered))
 	for _, account := range discovered {
-		result = append(result, ChromeAccount{Account: account, Imported: imported[chromeauth.AccountID(account.Email)]})
+		targetID := chromeauth.AccountID(account.Email)
+		isImported := false
+		if targetID != "" && importedIDs[targetID] {
+			isImported = true
+		} else if targetID == "" && importedIDs[chromeauth.AccountID(account.Profile)] {
+			isImported = true
+		} else if importedProfiles[browser+"/"+strings.ToLower(account.Profile)] {
+			isImported = true
+		}
+		result = append(result, BrowserAccount{Account: account, Imported: isImported})
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Profile < result[j].Profile })
 	return result, nil
 }
 
-// ChromeAccount 是本机 Chrome 中的一个 Google 账号及其导入状态
-type ChromeAccount struct {
+// ChromeAccounts 列出本机 Chrome 中可导入的账号，并标出已导入的账号
+func (m *Manager) ChromeAccounts() ([]ChromeAccount, error) {
+	return m.BrowserAccounts(chromeauth.BrowserChrome)
+}
+
+// BrowserAccount 是本机浏览器中的一个 Google 账号及其导入状态
+type BrowserAccount struct {
 	chromeauth.Account
 	Imported bool `json:"imported"`
 }
 
-// ImportChrome 按邮箱从本机 Chrome 导入账号并启动
-func (m *Manager) ImportChrome(ctx context.Context, emails []string, proxy string) ([]string, error) {
-	root, err := chromeauth.DefaultChromeRoot()
+// ChromeAccount 是本机 Chrome 中的一个 Google 账号及其导入状态
+type ChromeAccount = BrowserAccount
+
+// ImportBrowser 按邮箱或 Profile 从本机指定浏览器导入账号并启动
+func (m *Manager) ImportBrowser(ctx context.Context, browser string, targets []string, proxy string) ([]string, error) {
+	if browser == "" {
+		browser = chromeauth.BrowserChrome
+	}
+	root, err := chromeauth.DefaultBrowserRoot(browser)
 	if err != nil {
 		return nil, err
 	}
 	settings := m.Settings()
-	results, _, err := chromeauth.Import(ctx, chromeauth.ImportOptions{ChromeRoot: root, Output: settings.AuthDir, Proxy: proxy, RequestProxy: m.importProxy(), Emails: emails})
+	results, _, err := chromeauth.ImportBrowser(ctx, chromeauth.BrowserImportOptions{
+		Browser:      browser,
+		BrowserRoot:  root,
+		Output:       settings.AuthDir,
+		Proxy:        proxy,
+		RequestProxy: m.importProxy(),
+		Targets:      targets,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -635,6 +684,11 @@ func (m *Manager) ImportChrome(ctx context.Context, emails []string, proxy strin
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// ImportChrome 按邮箱从本机 Chrome 导入账号并启动
+func (m *Manager) ImportChrome(ctx context.Context, emails []string, proxy string) ([]string, error) {
+	return m.ImportBrowser(ctx, chromeauth.BrowserChrome, emails, proxy)
 }
 
 // ImportCookie 从 Cookie Header、浏览器导出的 JSON 或 Netscape cookies.txt 导入账号并启动

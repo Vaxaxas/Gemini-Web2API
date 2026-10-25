@@ -13,24 +13,29 @@ import (
 	"github.com/Mag1cFall/Gemini-Web2API/internal/logging"
 )
 
-// chromeRenewal 用保存的续签材料签发 Cookie，材料被拒时从本机 Chrome 读取同一 Gaia ID 账号的新材料并写回认证状态
+// chromeRenewal 用保存的续签材料签发 Cookie，材料被拒时从本机浏览器读取同一 Gaia ID 账号的新材料并写回认证状态
 type chromeRenewal struct {
 	mu       sync.Mutex
 	id       string
+	browser  string
 	material auth.OAuthMaterial
 	profile  string
 	proxy    string
 	file     *auth.File
-	// tried 是 Chrome 中已确认被拒的 refresh token 密文
+	// tried 是浏览器中已确认被拒的 refresh token 密文
 	tried []byte
 }
 
 // newChromeRenewal 返回账号的续签器
 func newChromeRenewal(account auth.LoadedAccount) *chromeRenewal {
-	return &chromeRenewal{id: account.ID, material: *account.OAuth, profile: account.Profile, proxy: account.ProxyURL, file: account.File}
+	browser := account.Browser
+	if browser == "" {
+		browser = chromeauth.BrowserChrome
+	}
+	return &chromeRenewal{id: account.ID, browser: browser, material: *account.OAuth, profile: account.Profile, proxy: account.ProxyURL, file: account.File}
 }
 
-// refresh 签发 Cookie，保存的材料被拒且 Chrome 中的材料已更新时改用 Chrome 中的材料
+// refresh 签发 Cookie，保存的材料被拒且浏览器中的材料已更新时改用浏览器中的材料
 func (r *chromeRenewal) refresh(ctx context.Context) ([]gemini.Cookie, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -38,17 +43,17 @@ func (r *chromeRenewal) refresh(ctx context.Context) ([]gemini.Cookie, error) {
 	if !errors.Is(err, chromeauth.ErrCredentialsRejected) || r.file == nil {
 		return cookies, err
 	}
-	current, findErr := chromeauth.FindChromeMaterial(r.material.GaiaID, r.profile)
+	current, findErr := chromeauth.FindBrowserMaterial(r.browser, r.material.GaiaID, r.profile)
 	if findErr != nil {
-		return nil, fmt.Errorf("%w；从 Chrome 重新导入失败: %v", err, findErr)
+		return nil, fmt.Errorf("%w；从 %s 重新导入失败: %v", err, r.browser, findErr)
 	}
 	if bytes.Equal(current.Encrypted, r.tried) {
-		return nil, fmt.Errorf("%w；Chrome 中的材料未更新", err)
+		return nil, fmt.Errorf("%w；%s 中的材料未更新", err, r.browser)
 	}
-	logging.Info(r.id, "续签材料被拒，从 Chrome 重新导入", "Profile", current.Profile)
+	logging.Info(r.id, "续签材料被拒，从浏览器重新导入", "Browser", r.browser, "Profile", current.Profile)
 	material, importErr := current.Decrypt()
 	if importErr == nil && material.RefreshToken == r.material.RefreshToken {
-		importErr = fmt.Errorf("%w：Chrome 中的材料与被拒材料相同", chromeauth.ErrCredentialsRejected)
+		importErr = fmt.Errorf("%w：%s 中的材料与被拒材料相同", chromeauth.ErrCredentialsRejected, r.browser)
 	}
 	if importErr == nil {
 		cookies, importErr = chromeauth.Refresh(ctx, material, r.proxy)
@@ -57,12 +62,12 @@ func (r *chromeRenewal) refresh(ctx context.Context) ([]gemini.Cookie, error) {
 		r.tried = current.Encrypted
 	}
 	if importErr != nil {
-		return nil, fmt.Errorf("%w；从 Chrome 重新导入失败: %w", err, importErr)
+		return nil, fmt.Errorf("%w；从 %s 重新导入失败: %w", err, r.browser, importErr)
 	}
 	if err := r.file.SetOAuth(material, current.Profile); err != nil {
 		return nil, err
 	}
 	r.material, r.profile = material, current.Profile
-	logging.Info(r.id, "已从 Chrome 重新导入续签材料", "Profile", current.Profile)
+	logging.Info(r.id, "已从浏览器重新导入续签材料", "Browser", r.browser, "Profile", current.Profile)
 	return cookies, nil
 }
