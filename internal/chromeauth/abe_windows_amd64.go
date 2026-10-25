@@ -3,6 +3,7 @@
 package chromeauth
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -46,6 +47,47 @@ var (
 //go:embed native/abe_helper_amd64.bin
 var abeHelperDLL []byte
 
+var (
+	chromeCLSIDP1 = []byte{0x48, 0xB8, 0xE0, 0x60, 0x88, 0x70, 0x41, 0xF6, 0x11, 0x46}
+	chromeCLSIDP2 = []byte{0x48, 0xB8, 0x88, 0x95, 0x7D, 0x86, 0x7D, 0xD3, 0x67, 0x5B}
+	chromeIIDP1   = []byte{0x48, 0xB8, 0x8B, 0x20, 0xF5, 0x1B, 0x5F, 0x29, 0x92, 0x49}
+	chromeIIDP2   = []byte{0x48, 0xB8, 0xB5, 0xF4, 0x3A, 0x9B, 0xB6, 0x49, 0x48, 0x38}
+
+	braveCLSIDP1 = []byte{0x48, 0xB8, 0xAF, 0x31, 0x6B, 0x57, 0x69, 0x63, 0x6B, 0x4B}
+	braveCLSIDP2 = []byte{0x48, 0xB8, 0x85, 0x60, 0xE4, 0xB2, 0x03, 0xA9, 0x7A, 0x8B}
+	braveIIDP1   = []byte{0x48, 0xB8, 0x1E, 0x86, 0x96, 0xF3, 0x8E, 0x0C, 0x71, 0x4C}
+	braveIIDP2   = []byte{0x48, 0xB8, 0x82, 0x56, 0x2F, 0xAE, 0x6D, 0x75, 0x9C, 0xE9}
+
+	edgeCLSIDP1 = []byte{0x48, 0xB8, 0x6C, 0xE9, 0xCB, 0x1F, 0x97, 0x16, 0xAF, 0x43}
+	edgeCLSIDP2 = []byte{0x48, 0xB8, 0x91, 0x40, 0x28, 0x97, 0xC7, 0xC6, 0x97, 0x67}
+	edgeIIDP1   = []byte{0x48, 0xB8, 0x07, 0xB8, 0xC2, 0xC9, 0x31, 0x77, 0x34, 0x4F}
+	edgeIIDP2   = []byte{0x48, 0xB8, 0x81, 0xB7, 0x44, 0xFF, 0x77, 0x79, 0x52, 0x2B}
+)
+
+func patchHelperDLL(browser string) []byte {
+	dll := make([]byte, len(abeHelperDLL))
+	copy(dll, abeHelperDLL)
+	switch strings.ToLower(strings.TrimSpace(browser)) {
+	case BrowserBrave:
+		patchBytes(dll, chromeCLSIDP1, braveCLSIDP1)
+		patchBytes(dll, chromeCLSIDP2, braveCLSIDP2)
+		patchBytes(dll, chromeIIDP1, braveIIDP1)
+		patchBytes(dll, chromeIIDP2, braveIIDP2)
+	case BrowserEdge:
+		patchBytes(dll, chromeCLSIDP1, edgeCLSIDP1)
+		patchBytes(dll, chromeCLSIDP2, edgeCLSIDP2)
+		patchBytes(dll, chromeIIDP1, edgeIIDP1)
+		patchBytes(dll, chromeIIDP2, edgeIIDP2)
+	}
+	return dll
+}
+
+func patchBytes(dst []byte, oldBytes, newBytes []byte) {
+	if idx := bytes.Index(dst, oldBytes); idx != -1 {
+		copy(dst[idx:idx+len(newBytes)], newBytes)
+	}
+}
+
 // retrieveV20Key 读取 Chrome App-Bound v20 主密钥
 func retrieveV20Key(chromeRoot string) ([]byte, error) {
 	return retrieveV20KeyForBrowser(BrowserChrome, chromeRoot)
@@ -61,7 +103,7 @@ func retrieveV20KeyForBrowser(browser string, root string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return decryptAppBoundCiphertext(browserPath, encrypted)
+	return decryptAppBoundCiphertext(browser, browserPath, encrypted)
 }
 
 // readAppBoundCiphertext 从 Local State 提取 APPB 密文
@@ -253,8 +295,8 @@ func firefoxExecutableFallbacks() []string {
 	return paths
 }
 
-// decryptAppBoundCiphertext 在独立 Chrome 进程内解密主密钥
-func decryptAppBoundCiphertext(chromePath string, encrypted []byte) ([]byte, error) {
+// decryptAppBoundCiphertext 在独立浏览器进程内解密主密钥
+func decryptAppBoundCiphertext(browser string, browserPath string, encrypted []byte) ([]byte, error) {
 	tempDir, err := os.MkdirTemp("", "gemini-web2api-abe-*")
 	if err != nil {
 		return nil, fmt.Errorf("创建 ABE 临时目录: %w", err)
@@ -263,7 +305,8 @@ func decryptAppBoundCiphertext(chromePath string, encrypted []byte) ([]byte, err
 
 	helperPath := filepath.Join(tempDir, abeHelperDLLName)
 	outputPath := filepath.Join(tempDir, abeKeyFileName)
-	if err := os.WriteFile(helperPath, abeHelperDLL, 0o600); err != nil {
+	helperBytes := patchHelperDLL(browser)
+	if err := os.WriteFile(helperPath, helperBytes, 0o600); err != nil {
 		return nil, fmt.Errorf("写入 ABE helper: %w", err)
 	}
 
@@ -271,7 +314,7 @@ func decryptAppBoundCiphertext(chromePath string, encrypted []byte) ([]byte, err
 		abeInputEnv:  base64.StdEncoding.EncodeToString(encrypted),
 		abeOutputEnv: outputPath,
 	})
-	process, thread, err := startHiddenChrome(chromePath, filepath.Join(tempDir, "profile"))
+	process, thread, err := startHiddenChrome(browserPath, filepath.Join(tempDir, "profile"))
 	restoreEnv()
 	if err != nil {
 		return nil, err
@@ -281,7 +324,7 @@ func decryptAppBoundCiphertext(chromePath string, encrypted []byte) ([]byte, err
 	defer stopChrome(process)
 
 	if _, err := windows.ResumeThread(thread); err != nil {
-		return nil, fmt.Errorf("启动临时 Chrome: %w", err)
+		return nil, fmt.Errorf("启动临时浏览器: %w", err)
 	}
 	time.Sleep(750 * time.Millisecond)
 	if err := injectDLL(process, helperPath); err != nil {
@@ -292,13 +335,13 @@ func decryptAppBoundCiphertext(chromePath string, encrypted []byte) ([]byte, err
 		data, err := os.ReadFile(outputPath)
 		if err == nil {
 			if len(data) != 32 {
-				return nil, fmt.Errorf("Chrome ABE helper 返回异常: %s", strings.TrimSpace(string(data)))
+				return nil, fmt.Errorf("%s ABE helper 返回异常: %s", browser, strings.TrimSpace(string(data)))
 			}
 			return data, nil
 		}
 		time.Sleep(abePollInterval)
 	}
-	return nil, fmt.Errorf("Chrome ABE helper 超时")
+	return nil, fmt.Errorf("%s ABE helper 超时", browser)
 }
 
 // stopChrome 结束临时 Chrome 并等主进程退出，之后临时目录中的文件才能删除

@@ -77,6 +77,7 @@ export interface ChromeProfile {
   profile: string
   display_name: string
   email: string
+  auth_user?: number
   importable: boolean
   imported: boolean
   // reason 为账号不可导入的原因，不可导入且缺省时为未在浏览器登录

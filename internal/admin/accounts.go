@@ -105,6 +105,7 @@ type browserProfile struct {
 	Profile     string `json:"profile"`
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
+	AuthUser    int    `json:"auth_user,omitempty"`
 	Importable  bool   `json:"importable"`
 	Imported    bool   `json:"imported"`
 	Reason      string `json:"reason,omitempty"`
@@ -130,7 +131,7 @@ func (h *handler) browserProfiles(c *gin.Context) {
 		}
 		profiles = append(profiles, browserProfile{
 			ID: id, Browser: browser, Profile: account.Profile, DisplayName: account.DisplayName,
-			Email: account.Email, Importable: account.Importable, Imported: account.Imported, Reason: account.Reason,
+			Email: account.Email, AuthUser: account.AuthUser, Importable: account.Importable, Imported: account.Imported, Reason: account.Reason,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"browser": browser, "profiles": profiles})
@@ -150,7 +151,7 @@ func (h *handler) chromeProfiles(c *gin.Context) {
 		}
 		profiles = append(profiles, browserProfile{
 			ID: id, Browser: "chrome", Profile: account.Profile, DisplayName: account.DisplayName,
-			Email: account.Email, Importable: account.Importable, Imported: account.Imported, Reason: account.Reason,
+			Email: account.Email, AuthUser: account.AuthUser, Importable: account.Importable, Imported: account.Imported, Reason: account.Reason,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"profiles": profiles})

@@ -238,11 +238,18 @@ func checkChromiumCookies(root string, profile string) (hasCookies bool, isLocke
 	return names["SAPISID"] && names["__Secure-1PSID"], false, nil
 }
 
-func readChromiumCookies(root string, profile string, masterKey []byte) ([]auth.StateCookie, error) {
+func readChromiumCookies(browser string, root string, profile string, masterKey []byte) ([]auth.StateCookie, error) {
 	dpapiKey, _ := decryptDPAPIMasterKey(root)
 
 	database, closeDatabase, err := openChromiumCookies(root, profile)
 	if err != nil {
+		if errors.Is(err, errBrowserRunning) || isSharingViolation(err) {
+			b := browser
+			if b == "" {
+				b = "浏览器"
+			}
+			return nil, fmt.Errorf("%s 正在运行中并锁定了 Cookie 数据库，请先关闭 %s 浏览器后再重试导入", b, b)
+		}
 		return nil, err
 	}
 	defer closeDatabase()
@@ -383,6 +390,7 @@ func discoverChromium(browser string, root string) ([]Account, error) {
 		identities, err := profileIdentities(root, profile)
 		if err == nil && len(identities) > 0 {
 			records, recordsErr := readTokenServices(root, profile)
+			hasCoreCookies, isLocked, cookieErr := checkChromiumCookies(root, profile)
 			seen := make(map[string]bool, len(identities))
 			for _, identity := range identities {
 				if identity.GaiaID == "" || seen[identity.GaiaID] {
@@ -390,21 +398,39 @@ func discoverChromium(browser string, root string) ([]Account, error) {
 				}
 				seen[identity.GaiaID] = true
 				record, found := records[identity.GaiaID]
+				dispName := identity.DisplayName
+				if dispName == "" {
+					dispName = info.Name
+				}
 				account := Account{
 					Browser:     browser,
 					Profile:     profile,
 					GaiaID:      identity.GaiaID,
-					DisplayName: info.Name,
+					DisplayName: dispName,
 					Email:       identity.Email,
-					SourceType:  "oauth",
+					AuthUser:    identity.AuthUser,
 				}
 				switch {
-				case recordsErr != nil:
+				case found:
+					account.SourceType = "oauth"
+					if recordsErr != nil {
+						account.Reason = ReasonReadFailed
+					} else if !strings.HasPrefix(string(record.encryptedToken), "v20") && !strings.HasPrefix(string(record.encryptedToken), "v10") {
+						account.Reason = ReasonNeedsReauth
+					} else {
+						account.Importable = true
+					}
+				case isLocked:
+					account.SourceType = "cookie"
+					account.Reason = ReasonBrowserRunning
+				case hasCoreCookies:
+					account.SourceType = "cookie"
+					account.Importable = true
+				case cookieErr != nil:
+					account.SourceType = "cookie"
 					account.Reason = ReasonReadFailed
-				case found && !strings.HasPrefix(string(record.encryptedToken), "v20") && !strings.HasPrefix(string(record.encryptedToken), "v10"):
-					account.Reason = ReasonNeedsReauth
 				default:
-					account.Importable = found
+					account.Reason = "not_signed_in"
 				}
 				accounts = append(accounts, account)
 			}
@@ -435,10 +461,12 @@ func discoverChromium(browser string, root string) ([]Account, error) {
 	return accounts, nil
 }
 
-// profileIdentity 是 Preferences.account_info 中的一个 Google 账号
+// profileIdentity 是 Preferences 中的一个 Google 账号
 type profileIdentity struct {
-	GaiaID string `json:"gaia"`
-	Email  string `json:"email"`
+	GaiaID      string `json:"gaia"`
+	Email       string `json:"email"`
+	DisplayName string `json:"name,omitempty"`
+	AuthUser    int    `json:"authuser,omitempty"`
 }
 
 // profileIdentities 读取 Profile 中登录的全部 Google 账号
@@ -448,12 +476,35 @@ func profileIdentities(chromeRoot string, profile string) ([]profileIdentity, er
 		return nil, fmt.Errorf("读取 %s Preferences: %w", profile, err)
 	}
 	var preferences struct {
-		Accounts []profileIdentity `json:"account_info"`
+		Accounts   []profileIdentity `json:"account_info"`
+		GaiaCookie struct {
+			LastListAccountsBinary string `json:"last_list_accounts_binary_data"`
+		} `json:"gaia_cookie"`
 	}
 	if err := json.Unmarshal(data, &preferences); err != nil {
 		return nil, fmt.Errorf("解析 %s Preferences: %w", profile, err)
 	}
-	return preferences.Accounts, nil
+	if len(preferences.Accounts) > 0 {
+		return preferences.Accounts, nil
+	}
+	if preferences.GaiaCookie.LastListAccountsBinary != "" {
+		if raw, err := base64.StdEncoding.DecodeString(preferences.GaiaCookie.LastListAccountsBinary); err == nil {
+			parsed := parseGaiaAccounts(raw)
+			if len(parsed) > 0 {
+				identities := make([]profileIdentity, len(parsed))
+				for i, p := range parsed {
+					identities[i] = profileIdentity{
+						GaiaID:      p.GaiaID,
+						Email:       p.Email,
+						DisplayName: p.DisplayName,
+						AuthUser:    p.AuthUser,
+					}
+				}
+				return identities, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // openWebData 把 Profile 的 Web Data 与其 WAL 日志复制到临时目录后只读打开，绕过运行中 Chrome 的排他锁并包含尚未检查点的写入

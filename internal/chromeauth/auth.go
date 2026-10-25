@@ -41,6 +41,7 @@ type Account struct {
 	GaiaID      string `json:"-"`
 	DisplayName string `json:"displayName"`
 	Email       string `json:"email"`
+	AuthUser    int    `json:"authUser,omitempty"`
 	Importable  bool   `json:"importable"`
 	// Reason 是账号不可导入的原因，不可导入且为空时表示该账号未在浏览器登录
 	Reason string `json:"reason,omitempty"`
@@ -305,7 +306,7 @@ func importChromium(ctx context.Context, options BrowserImportOptions) ([]Import
 	pending := make([]pendingImport, 0, len(selected))
 	for _, account := range selected {
 		if account.SourceType == "cookie" {
-			cookies, err := readChromiumCookies(root, account.Profile, masterKey)
+			cookies, err := readChromiumCookies(options.Browser, root, account.Profile, masterKey)
 			if err != nil {
 				return nil, 0, fmt.Errorf("读取 %s %s Cookie: %w", options.Browser, account.Profile, err)
 			}
@@ -330,6 +331,7 @@ func importChromium(ctx context.Context, options BrowserImportOptions) ([]Import
 					Proxy:    proxyURL,
 					Source:   auth.ImportSource{Browser: options.Browser, Profile: account.Profile},
 					Language: language,
+					AuthUser: account.AuthUser,
 				},
 			}
 			pending = append(pending, pendingImport{
@@ -394,6 +396,13 @@ func selectAccounts(accounts []Account, profiles []string, emails []string, targ
 			continue
 		}
 		if !account.Importable {
+			if account.Reason == ReasonBrowserRunning {
+				b := account.Browser
+				if b == "" {
+					b = "浏览器"
+				}
+				return nil, fmt.Errorf("%s 正在运行中并锁定了 Cookie 数据库，请先关闭 %s 浏览器后再重试导入", b, b)
+			}
 			return nil, fmt.Errorf("%s %s 缺少可导入的认证材料", account.Profile, account.Email)
 		}
 		if account.SourceType != "cookie" && !strings.Contains(account.Email, "@") {

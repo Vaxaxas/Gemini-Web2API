@@ -85,7 +85,7 @@ func decryptDPAPIMasterKey(string) ([]byte, error) {
 	return nil, fmt.Errorf("Chromium 浏览器导入仅支持 Windows")
 }
 
-func readChromiumCookies(string, string, []byte) ([]auth.StateCookie, error) {
+func readChromiumCookies(string, string, string, []byte) ([]auth.StateCookie, error) {
 	return nil, fmt.Errorf("Chromium 浏览器导入仅支持 Windows")
 }
 

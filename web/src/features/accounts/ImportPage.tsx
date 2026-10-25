@@ -87,7 +87,7 @@ function BrowserImport() {
             {items.map((profile) => {
               const target = profile.email || profile.profile
               return (
-                <li key={profile.profile + '/' + profile.email}>
+                <li key={`${profile.profile}/${profile.email}/${profile.auth_user ?? 0}`}>
                   <label className="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-hover has-disabled:cursor-default has-disabled:opacity-70">
                     <input
                       type="checkbox"
@@ -107,9 +107,21 @@ function BrowserImport() {
                       </span>
                       <span
                         className="truncate text-xs text-foreground-muted"
-                        title={[profile.display_name, profile.profile].filter(Boolean).join(' · ')}
+                        title={[
+                          profile.display_name,
+                          profile.profile,
+                          profile.auth_user !== undefined ? `${m.authUser} /u/${profile.auth_user}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       >
-                        {[profile.display_name, profile.profile].filter(Boolean).join(' · ')}
+                        {[
+                          profile.display_name,
+                          profile.profile,
+                          profile.auth_user !== undefined ? `${m.authUser} /u/${profile.auth_user}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                     </span>
                     {profile.imported ? (
