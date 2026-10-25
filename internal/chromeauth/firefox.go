@@ -79,15 +79,13 @@ func openFirefoxCookies(profileDir string) (*sql.DB, func(), error) {
 	}()
 	src := filepath.Join(profileDir, "cookies.sqlite")
 	dst := filepath.Join(tempDir, "cookies.sqlite")
-	if err = copyFile(src, dst); err != nil {
+	if err = copyLockedFile(src, dst, "firefox.exe"); err != nil {
 		if isSharingViolation(err) {
 			return nil, nil, fmt.Errorf("%w: %s", errBrowserRunning, err.Error())
 		}
 		return nil, nil, fmt.Errorf("复制 Firefox cookies.sqlite: %w", err)
 	}
-	if err = copyFile(src+"-wal", dst+"-wal"); err != nil && !os.IsNotExist(err) && !isSharingViolation(err) {
-		return nil, nil, fmt.Errorf("复制 Firefox cookies.sqlite-wal: %w", err)
-	}
+	_ = copyLockedFile(src+"-wal", dst+"-wal", "firefox.exe")
 	uri := "file:" + filepath.ToSlash(dst) + "?mode=ro"
 	database, err := sql.Open("sqlite", uri)
 	if err != nil {

@@ -173,7 +173,7 @@ func retrieveMasterKey(browser string, root string) ([]byte, error) {
 	return nil, fmt.Errorf("解密 %s 主密钥失败: %w", browser, dpapiErr)
 }
 
-func openChromiumCookies(root string, profile string) (*sql.DB, func(), error) {
+func openChromiumCookies(browser string, root string, profile string) (*sql.DB, func(), error) {
 	tempDir, err := os.MkdirTemp("", "gemini-web2api-cookies-*")
 	if err != nil {
 		return nil, nil, fmt.Errorf("创建 Cookie 临时目录: %w", err)
@@ -191,15 +191,18 @@ func openChromiumCookies(root string, profile string) (*sql.DB, func(), error) {
 		}
 	}
 	copyPath := filepath.Join(tempDir, "Cookies")
-	if err = copyFile(cookiePath, copyPath); err != nil {
+	exeName := browserExeName(browser)
+	if err = copyLockedFile(cookiePath, copyPath, exeName); err != nil {
 		if isSharingViolation(err) {
-			return nil, nil, fmt.Errorf("%w: %s", errBrowserRunning, err.Error())
+			b := browser
+			if b == "" {
+				b = "浏览器"
+			}
+			return nil, nil, fmt.Errorf("%s 正在运行中并锁定了 Cookie 数据库，请先关闭 %s 浏览器后再重试导入", b, b)
 		}
 		return nil, nil, fmt.Errorf("复制 %s Cookies: %w", profile, err)
 	}
-	if err = copyFile(cookiePath+"-wal", copyPath+"-wal"); err != nil && !os.IsNotExist(err) && !isSharingViolation(err) {
-		return nil, nil, fmt.Errorf("复制 %s Cookies-wal: %w", profile, err)
-	}
+	_ = copyLockedFile(cookiePath+"-wal", copyPath+"-wal", exeName)
 	uri := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(copyPath), RawQuery: "mode=ro"}
 	database, err := sql.Open("sqlite", uri.String())
 	if err != nil {
@@ -212,8 +215,8 @@ func openChromiumCookies(root string, profile string) (*sql.DB, func(), error) {
 	}, nil
 }
 
-func checkChromiumCookies(root string, profile string) (hasCookies bool, isLocked bool, err error) {
-	database, closeDatabase, err := openChromiumCookies(root, profile)
+func checkChromiumCookies(browser string, root string, profile string) (hasCookies bool, isLocked bool, err error) {
+	database, closeDatabase, err := openChromiumCookies(browser, root, profile)
 	if err != nil {
 		if errors.Is(err, errBrowserRunning) || isSharingViolation(err) {
 			return false, true, nil
@@ -241,7 +244,7 @@ func checkChromiumCookies(root string, profile string) (hasCookies bool, isLocke
 func readChromiumCookies(browser string, root string, profile string, masterKey []byte) ([]auth.StateCookie, error) {
 	dpapiKey, _ := decryptDPAPIMasterKey(root)
 
-	database, closeDatabase, err := openChromiumCookies(root, profile)
+	database, closeDatabase, err := openChromiumCookies(browser, root, profile)
 	if err != nil {
 		if errors.Is(err, errBrowserRunning) || isSharingViolation(err) {
 			b := browser
@@ -402,7 +405,7 @@ func discoverChromium(browser string, root string) ([]Account, error) {
 		identities, err := profileIdentities(root, profile)
 		if err == nil && len(identities) > 0 {
 			records, recordsErr := readTokenServices(root, profile)
-			hasCoreCookies, isLocked, cookieErr := checkChromiumCookies(root, profile)
+			hasCoreCookies, isLocked, cookieErr := checkChromiumCookies(browser, root, profile)
 			seen := make(map[string]bool, len(identities))
 			for _, identity := range identities {
 				if identity.GaiaID == "" || seen[identity.GaiaID] {
@@ -449,7 +452,7 @@ func discoverChromium(browser string, root string) ([]Account, error) {
 		}
 
 		if len(identities) == 0 {
-			hasCoreCookies, isLocked, cookieErr := checkChromiumCookies(root, profile)
+			hasCoreCookies, isLocked, cookieErr := checkChromiumCookies(browser, root, profile)
 			acc := Account{
 				Browser:     browser,
 				Profile:     profile,
