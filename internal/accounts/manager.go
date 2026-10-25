@@ -603,21 +603,28 @@ func (m *Manager) BrowserAccounts(browser string) ([]BrowserAccount, error) {
 	if err != nil {
 		return nil, err
 	}
+	importedEmails := make(map[string]bool)
 	importedIDs := make(map[string]bool)
-	importedProfiles := make(map[string]bool)
+	importedNoEmailProfiles := make(map[string]bool)
 	m.mu.Lock()
 	for id, entry := range m.accounts {
-		importedIDs[id] = true
+		importedIDs[strings.ToLower(id)] = true
+		var email string
 		if client := m.pool.Client(id); client != nil && client.Email() != "" {
-			importedIDs[chromeauth.AccountID(client.Email())] = true
+			email = client.Email()
+		}
+		if email != "" {
+			importedEmails[strings.ToLower(strings.TrimSpace(email))] = true
+			importedIDs[chromeauth.AccountID(email)] = true
 		}
 		if entry != nil {
 			b := entry.account.Browser
 			if b == "" && entry.account.OAuth != nil {
 				b = chromeauth.BrowserChrome
 			}
-			if b != "" && entry.account.Profile != "" {
-				importedProfiles[b+"/"+strings.ToLower(entry.account.Profile)] = true
+			prof := strings.ToLower(entry.account.Profile)
+			if email == "" && b != "" && prof != "" {
+				importedNoEmailProfiles[b+"/"+prof] = true
 			}
 		}
 	}
@@ -625,14 +632,24 @@ func (m *Manager) BrowserAccounts(browser string) ([]BrowserAccount, error) {
 
 	result := make([]BrowserAccount, 0, len(discovered))
 	for _, account := range discovered {
-		targetID := chromeauth.AccountID(account.Email)
 		isImported := false
-		if targetID != "" && importedIDs[targetID] {
-			isImported = true
-		} else if targetID == "" && importedIDs[chromeauth.AccountID(account.Profile)] {
-			isImported = true
-		} else if importedProfiles[browser+"/"+strings.ToLower(account.Profile)] {
-			isImported = true
+		email := strings.ToLower(strings.TrimSpace(account.Email))
+		targetID := chromeauth.AccountID(email)
+
+		if email != "" && strings.Contains(email, "@") {
+			if importedEmails[email] || (targetID != "" && importedIDs[targetID]) {
+				isImported = true
+			}
+		} else {
+			profID := chromeauth.AccountID(account.Profile)
+			b := strings.ToLower(account.Browser)
+			if b == "" {
+				b = browser
+			}
+			profKey := b + "/" + strings.ToLower(account.Profile)
+			if (profID != "" && importedIDs[profID]) || importedNoEmailProfiles[profKey] {
+				isImported = true
+			}
 		}
 		result = append(result, BrowserAccount{Account: account, Imported: isImported})
 	}
