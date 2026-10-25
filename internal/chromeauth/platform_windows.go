@@ -293,6 +293,9 @@ func readChromiumCookies(browser string, root string, profile string, masterKey 
 					if err == nil {
 						plain, err := gcm.Open(nil, encrypted[3:15], encrypted[15:], nil)
 						if err == nil {
+							if ver == "v20" && len(plain) > 32 && !isPrintableASCII(plain[:32]) {
+								plain = plain[32:]
+							}
 							val = string(plain)
 						}
 					}
@@ -333,6 +336,15 @@ func readChromiumCookies(browser string, root string, profile string, masterKey 
 		return nil, fmt.Errorf("%s 缺少核心 Google Cookie (SAPISID/__Secure-1PSID)", profile)
 	}
 	return cookies, nil
+}
+
+func isPrintableASCII(data []byte) bool {
+	for _, b := range data {
+		if b < 32 || b > 126 {
+			return false
+		}
+	}
+	return true
 }
 
 func discoverPlatformBrowser(browser string, root string) ([]Account, error) {
