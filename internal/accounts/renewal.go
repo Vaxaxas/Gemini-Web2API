@@ -71,3 +71,44 @@ func (r *chromeRenewal) refresh(ctx context.Context) ([]gemini.Cookie, error) {
 	logging.Info(r.id, "已从浏览器重新导入续签材料", "Browser", r.browser, "Profile", current.Profile)
 	return cookies, nil
 }
+
+// browserRenewal 在 Cookie 会话失效且没有 OAuth 续签材料时，从本机浏览器重新读取最新 Cookie 并写回认证状态
+type browserRenewal struct {
+	mu      sync.Mutex
+	id      string
+	browser string
+	profile string
+	file    *auth.File
+}
+
+// newBrowserRenewal 返回浏览器 Cookie 账号的续签器
+func newBrowserRenewal(account auth.LoadedAccount) *browserRenewal {
+	browser := account.Browser
+	if browser == "" {
+		browser = chromeauth.BrowserChrome
+	}
+	return &browserRenewal{id: account.ID, browser: browser, profile: account.Profile, file: account.File}
+}
+
+// refresh 从本机浏览器读取当前最新的 Cookie 并写回认证状态
+func (r *browserRenewal) refresh(ctx context.Context) ([]gemini.Cookie, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.file == nil || r.profile == "" {
+		return nil, gemini.ErrSignedOut
+	}
+	logging.Info(r.id, "Cookie 会话失效，从浏览器重新读取", "Browser", r.browser, "Profile", r.profile)
+	stateCookies, err := chromeauth.ReadBrowserCookies(r.browser, r.profile)
+	if err != nil {
+		return nil, fmt.Errorf("从 %s 重新读取 Cookie 失败: %w", r.browser, err)
+	}
+	geminiCookies := auth.ToGeminiCookies(stateCookies)
+	if len(geminiCookies) == 0 {
+		return nil, fmt.Errorf("从 %s 未读取到任何 Cookie", r.browser)
+	}
+	if err := r.file.SaveCookies(geminiCookies); err != nil {
+		logging.Warn(r.id, "写回重新读取的 Cookie 失败", "错误", err)
+	}
+	logging.Info(r.id, "已从浏览器重新读取最新 Cookie", "Browser", r.browser, "Count", len(geminiCookies))
+	return geminiCookies, nil
+}

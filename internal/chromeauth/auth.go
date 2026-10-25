@@ -212,6 +212,25 @@ func Import(ctx context.Context, options ImportOptions) ([]ImportResult, int, er
 	})
 }
 
+// ReadBrowserCookies 读取指定浏览器 Profile 中的 Google Cookie
+func ReadBrowserCookies(browser string, profile string) ([]auth.StateCookie, error) {
+	if browser == "" {
+		browser = BrowserChrome
+	}
+	root, err := DefaultBrowserRoot(browser)
+	if err != nil {
+		return nil, err
+	}
+	if browser == BrowserFirefox {
+		return readFirefoxCookies(root, profile)
+	}
+	masterKey, err := retrieveMasterKey(browser, root)
+	if err != nil {
+		return nil, err
+	}
+	return readChromiumCookies(browser, root, profile, masterKey)
+}
+
 // ImportBrowser 用本机指定浏览器的认证材料生成协议账号状态
 func ImportBrowser(ctx context.Context, options BrowserImportOptions) ([]ImportResult, int, error) {
 	res, err := ImportBrowserWithDetails(ctx, options)

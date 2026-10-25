@@ -309,6 +309,11 @@ func validateOAuthMaterial(material *OAuthMaterial) error {
 	return nil
 }
 
+// ToGeminiCookies 将 StateCookie 转换为协议客户端 Cookie
+func ToGeminiCookies(cookies []StateCookie) []gemini.Cookie {
+	return toGeminiCookies(cookies)
+}
+
 func toGeminiCookies(cookies []StateCookie) []gemini.Cookie {
 	result := make([]gemini.Cookie, 0, len(cookies))
 	for _, cookie := range cookies {

@@ -240,6 +240,8 @@ func (m *Manager) launch(account auth.LoadedAccount, firstDone func()) {
 
 	if account.OAuth != nil {
 		account.Source.Refresh = newChromeRenewal(account).refresh
+	} else if account.Browser != "" && account.Profile != "" {
+		account.Source.Refresh = newBrowserRenewal(account).refresh
 	}
 	account.Source.Concurrency = settings.Concurrency
 	client, err := gemini.NewClient(account.Source, account.ProxyURL, settings.SaveHistory)
@@ -512,6 +514,11 @@ func (m *Manager) Verify(accountID string) error {
 		return fmt.Errorf("账号 %q 已停用", accountID)
 	}
 	logging.Info(accountID, "账号重新验证")
+	if entry.account.OAuth == nil && entry.account.Browser != "" && entry.account.Profile != "" {
+		if cookies, err := newBrowserRenewal(entry.account).refresh(m.ctx); err == nil && len(cookies) > 0 {
+			entry.account.Source.Cookies = cookies
+		}
+	}
 	if err := m.restart(entry.account); err != nil {
 		return err
 	}

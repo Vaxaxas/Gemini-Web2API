@@ -111,7 +111,7 @@ function BrowserImport() {
                       type="checkbox"
                       className="size-4 accent-primary"
                       checked={selected.includes(target)}
-                      disabled={profile.imported || !profile.importable}
+                      disabled={!profile.importable}
                       onChange={() => {
                         toggle(target)
                       }}
