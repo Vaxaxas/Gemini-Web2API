@@ -714,6 +714,7 @@ export const importMessages = defineMessages({
     proxyHint: '留空时从代理池分配；填写后作为该账号的固定代理，填 direct 表示直连',
     importCookie: '导入',
     importDone: '导入完成',
+    importPartial: '成功导入 {succeeded} 个，失败 {failed} 个',
     pairingTitle: '远程配对',
     pairingHint:
       '服务所在的机器没有 Chrome 时，在登录了 Chrome 的电脑上运行下面的命令，按提示粘贴配对令牌',
@@ -756,6 +757,7 @@ export const importMessages = defineMessages({
     proxyHint: '留空時從代理池分配；填寫後作為該帳號的固定代理，填 direct 表示直連',
     importCookie: '匯入',
     importDone: '匯入完成',
+    importPartial: '成功匯入 {succeeded} 個，失敗 {failed} 個',
     pairingTitle: '遠端配對',
     pairingHint:
       '服務所在的機器沒有 Chrome 時，在登入了 Chrome 的電腦上執行下列指令，依提示貼上配對權杖',
@@ -799,6 +801,7 @@ export const importMessages = defineMessages({
       'Leave empty to use the proxy pool; a value becomes this account’s fixed proxy, and direct connects without a proxy',
     importCookie: 'Import',
     importDone: 'Import complete',
+    importPartial: '{succeeded} succeeded, {failed} failed',
     pairingTitle: 'Remote pairing',
     pairingHint:
       'When the service runs on a machine without Chrome, run this command on a computer signed in to Chrome and paste the pairing token when asked',
@@ -843,6 +846,7 @@ export const importMessages = defineMessages({
       '空欄の場合はプロキシプールから割り当てます。入力するとこのアカウントの固定プロキシになり、direct で直接接続します',
     importCookie: 'インポート',
     importDone: 'インポートしました',
+    importPartial: '{succeeded} 件のインポートに成功、{failed} 件が失敗',
     pairingTitle: 'リモートペアリング',
     pairingHint:
       'サービスを動かすマシンに Chrome がない場合は、Chrome にログインしたパソコンで次のコマンドを実行し、表示に従ってペアリングトークンを貼り付けます',
@@ -886,6 +890,7 @@ export const importMessages = defineMessages({
       '비워 두면 프록시 풀에서 할당합니다. 입력하면 이 계정의 고정 프록시가 되며, direct는 직접 연결합니다',
     importCookie: '가져오기',
     importDone: '가져오기 완료',
+    importPartial: '{succeeded}개 가져오기 성공, {failed}개 실패',
     pairingTitle: '원격 페어링',
     pairingHint:
       '서비스가 실행되는 머신에 Chrome이 없으면 Chrome에 로그인된 컴퓨터에서 아래 명령을 실행하고 안내에 따라 페어링 토큰을 붙여 넣습니다',
@@ -930,6 +935,7 @@ export const importMessages = defineMessages({
       'Laissez vide pour utiliser le pool de proxys ; une valeur devient le proxy fixe de ce compte, direct pour une connexion directe',
     importCookie: 'Importer',
     importDone: 'Importation terminée',
+    importPartial: '{succeeded} importés avec succès, {failed} échoués',
     pairingTitle: 'Appairage à distance',
     pairingHint:
       'Si la machine du service n’a pas Chrome, exécutez cette commande sur un ordinateur connecté à Chrome et collez le jeton d’appairage lorsqu’il est demandé',
@@ -974,6 +980,7 @@ export const importMessages = defineMessages({
       'Leer lassen für den Proxy-Pool; ein Wert wird zum festen Proxy dieses Kontos, direct für eine direkte Verbindung',
     importCookie: 'Importieren',
     importDone: 'Import abgeschlossen',
+    importPartial: '{succeeded} erfolgreich importiert, {failed} fehlgeschlagen',
     pairingTitle: 'Remote-Kopplung',
     pairingHint:
       'Läuft der Dienst auf einem Rechner ohne Chrome, führen Sie diesen Befehl auf einem bei Chrome angemeldeten Computer aus und fügen Sie das Kopplungstoken bei Aufforderung ein',

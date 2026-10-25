@@ -179,12 +179,12 @@ func (h *handler) importBrowser(c *gin.Context) {
 	if browser == "" {
 		browser = "chrome"
 	}
-	ids, err := h.Accounts.ImportBrowser(c.Request.Context(), browser, targets, trimmed(input.Proxy))
-	if err != nil {
+	ids, failures, err := h.Accounts.ImportBrowser(c.Request.Context(), browser, targets, trimmed(input.Proxy))
+	if err != nil && len(ids) == 0 {
 		writeError(c, http.StatusBadRequest, "account_import_failed", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"accounts": h.accountsByID(ids)})
+	c.JSON(http.StatusOK, gin.H{"accounts": h.accountsByID(ids), "failures": failures})
 }
 
 func (h *handler) importChrome(c *gin.Context) {

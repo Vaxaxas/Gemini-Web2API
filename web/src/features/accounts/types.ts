@@ -94,6 +94,18 @@ export interface ChromeProfiles {
 
 export type BrowserProfiles = ChromeProfiles
 
+// ImportFailure 对应批量导入时单个账号的失败项
+export interface ImportFailure {
+  target: string
+  error: string
+}
+
+// ImportBrowserResponse 对应 POST /api/accounts/import/browser 的响应
+export interface ImportBrowserResponse {
+  accounts: Account[]
+  failures?: ImportFailure[]
+}
+
 // PairingToken 对应 POST /api/pairing 的响应
 export interface PairingToken {
   token: string

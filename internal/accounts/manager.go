@@ -672,16 +672,16 @@ type BrowserAccount struct {
 type ChromeAccount = BrowserAccount
 
 // ImportBrowser 按邮箱或 Profile 从本机指定浏览器导入账号并启动
-func (m *Manager) ImportBrowser(ctx context.Context, browser string, targets []string, proxy string) ([]string, error) {
+func (m *Manager) ImportBrowser(ctx context.Context, browser string, targets []string, proxy string) ([]string, []chromeauth.ImportFailure, error) {
 	if browser == "" {
 		browser = chromeauth.BrowserChrome
 	}
 	root, err := chromeauth.DefaultBrowserRoot(browser)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	settings := m.Settings()
-	results, _, err := chromeauth.ImportBrowser(ctx, chromeauth.BrowserImportOptions{
+	res, err := chromeauth.ImportBrowserWithDetails(ctx, chromeauth.BrowserImportOptions{
 		Browser:      browser,
 		BrowserRoot:  root,
 		Output:       settings.AuthDir,
@@ -689,23 +689,32 @@ func (m *Manager) ImportBrowser(ctx context.Context, browser string, targets []s
 		RequestProxy: m.importProxy(),
 		Targets:      targets,
 	})
-	if err != nil {
-		return nil, err
+	if err != nil && len(res.Results) == 0 {
+		return nil, res.Failures, err
 	}
-	ids := make([]string, 0, len(results))
-	for _, result := range results {
-		id, err := m.addFile(result.Path)
-		if err != nil {
-			return ids, err
+	ids := make([]string, 0, len(res.Results))
+	for _, result := range res.Results {
+		id, addErr := m.addFile(result.Path)
+		if addErr != nil {
+			target := result.Email
+			if target == "" {
+				target = result.Profile
+			}
+			res.Failures = append(res.Failures, chromeauth.ImportFailure{Target: target, Error: addErr.Error()})
+			continue
 		}
 		ids = append(ids, id)
 	}
-	return ids, nil
+	if len(ids) == 0 && len(res.Failures) > 0 {
+		return nil, res.Failures, fmt.Errorf("所有所选账号均导入失败: %s", res.Failures[0].Error)
+	}
+	return ids, res.Failures, nil
 }
 
 // ImportChrome 按邮箱从本机 Chrome 导入账号并启动
 func (m *Manager) ImportChrome(ctx context.Context, emails []string, proxy string) ([]string, error) {
-	return m.ImportBrowser(ctx, chromeauth.BrowserChrome, emails, proxy)
+	ids, _, err := m.ImportBrowser(ctx, chromeauth.BrowserChrome, emails, proxy)
+	return ids, err
 }
 
 // ImportCookie 从 Cookie Header、浏览器导出的 JSON 或 Netscape cookies.txt 导入账号并启动

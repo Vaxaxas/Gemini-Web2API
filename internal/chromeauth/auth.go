@@ -82,6 +82,19 @@ type BrowserImportOptions struct {
 	Targets      []string
 }
 
+// ImportFailure 描述单个账号导入失败的原因
+type ImportFailure struct {
+	Target string `json:"target"`
+	Error  string `json:"error"`
+}
+
+// ImportBrowserResult 包含批量导入的结果与失败详情
+type ImportBrowserResult struct {
+	Results  []ImportResult  `json:"results"`
+	Failures []ImportFailure `json:"failures,omitempty"`
+	Models   int             `json:"models"`
+}
+
 // ImportResult 描述单个账号导入结果
 type ImportResult struct {
 	Profile     string `json:"profile"`
@@ -179,7 +192,7 @@ func ImportCookies(ctx context.Context, options CookieImportOptions) (ImportResu
 		},
 		requestProxy: requestProxy,
 	}
-	results, modelCount, err := validateAndWriteImports(ctx, []pendingImport{pending})
+	results, _, modelCount, err := validateAndWriteImports(ctx, []pendingImport{pending}, nil)
 	if err != nil {
 		return ImportResult{}, 0, err
 	}
@@ -201,6 +214,12 @@ func Import(ctx context.Context, options ImportOptions) ([]ImportResult, int, er
 
 // ImportBrowser 用本机指定浏览器的认证材料生成协议账号状态
 func ImportBrowser(ctx context.Context, options BrowserImportOptions) ([]ImportResult, int, error) {
+	res, err := ImportBrowserWithDetails(ctx, options)
+	return res.Results, res.Models, err
+}
+
+// ImportBrowserWithDetails 用本机指定浏览器的认证材料生成协议账号状态，返回成功与失败详情
+func ImportBrowserWithDetails(ctx context.Context, options BrowserImportOptions) (ImportBrowserResult, error) {
 	if options.Browser == "" {
 		options.Browser = BrowserChrome
 	}
@@ -210,33 +229,39 @@ func ImportBrowser(ctx context.Context, options BrowserImportOptions) ([]ImportR
 	return importChromium(ctx, options)
 }
 
-func importFirefox(ctx context.Context, options BrowserImportOptions) ([]ImportResult, int, error) {
+func importFirefox(ctx context.Context, options BrowserImportOptions) (ImportBrowserResult, error) {
 	proxyURL, requestProxy, err := importProxies(options.Proxy, options.RequestProxy)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	root := options.BrowserRoot
 	if root == "" {
 		var rootErr error
 		root, rootErr = DefaultFirefoxRoot()
 		if rootErr != nil {
-			return nil, 0, rootErr
+			return ImportBrowserResult{}, rootErr
 		}
 		options.BrowserRoot = root
 	}
 	accounts, err := discoverFirefox(root)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	selected, err := selectAccounts(accounts, options.Profiles, options.Emails, options.Targets)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	pending := make([]pendingImport, 0, len(selected))
+	var initialFailures []ImportFailure
 	for _, account := range selected {
+		targetLabel := account.Email
+		if targetLabel == "" {
+			targetLabel = account.Profile
+		}
 		cookies, err := readFirefoxCookies(root, account.Profile)
 		if err != nil {
-			return nil, 0, fmt.Errorf("读取 Firefox %s Cookie: %w", account.Profile, err)
+			initialFailures = append(initialFailures, ImportFailure{Target: targetLabel, Error: err.Error()})
+			continue
 		}
 		id := AccountID(account.Email)
 		if id == "" {
@@ -245,7 +270,8 @@ func importFirefox(ctx context.Context, options BrowserImportOptions) ([]ImportR
 		path := filepath.Join(options.Output, id, storageFileName)
 		absPath, err := filepath.Abs(path)
 		if err != nil {
-			return nil, 0, fmt.Errorf("解析认证状态路径: %w", err)
+			initialFailures = append(initialFailures, ImportFailure{Target: targetLabel, Error: fmt.Sprintf("解析认证状态路径: %v", err)})
+			continue
 		}
 		state := auth.StorageState{
 			Cookies: cookies,
@@ -266,49 +292,56 @@ func importFirefox(ctx context.Context, options BrowserImportOptions) ([]ImportR
 			requestProxy: requestProxy,
 		})
 	}
-	return validateAndWriteImports(ctx, pending)
+	succeeded, failures, models, err := validateAndWriteImports(ctx, pending, initialFailures)
+	return ImportBrowserResult{Results: succeeded, Failures: failures, Models: models}, err
 }
 
-func importChromium(ctx context.Context, options BrowserImportOptions) ([]ImportResult, int, error) {
+func importChromium(ctx context.Context, options BrowserImportOptions) (ImportBrowserResult, error) {
 	if err := ensurePlatformImport(); err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	proxyURL, requestProxy, err := importProxies(options.Proxy, options.RequestProxy)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	root := options.BrowserRoot
 	if root == "" {
 		var rootErr error
 		root, rootErr = DefaultBrowserRoot(options.Browser)
 		if rootErr != nil {
-			return nil, 0, rootErr
+			return ImportBrowserResult{}, rootErr
 		}
 		options.BrowserRoot = root
 	}
 	accounts, err := DiscoverBrowser(options.Browser, root)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	selected, err := selectAccounts(accounts, options.Profiles, options.Emails, options.Targets)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 
 	masterKey, err := retrieveMasterKey(options.Browser, root)
 	if err != nil {
-		return nil, 0, err
+		return ImportBrowserResult{}, err
 	}
 	if len(masterKey) != 32 {
-		return nil, 0, fmt.Errorf("%s 主密钥长度异常", options.Browser)
+		return ImportBrowserResult{}, fmt.Errorf("%s 主密钥长度异常", options.Browser)
 	}
 
 	pending := make([]pendingImport, 0, len(selected))
+	var initialFailures []ImportFailure
 	for _, account := range selected {
+		targetLabel := account.Email
+		if targetLabel == "" {
+			targetLabel = account.Profile
+		}
 		if account.SourceType == "cookie" {
 			cookies, err := readChromiumCookies(options.Browser, root, account.Profile, masterKey)
 			if err != nil {
-				return nil, 0, fmt.Errorf("读取 %s %s Cookie: %w", options.Browser, account.Profile, err)
+				initialFailures = append(initialFailures, ImportFailure{Target: targetLabel, Error: err.Error()})
+				continue
 			}
 			id := AccountID(account.Email)
 			if id == "" {
@@ -317,7 +350,8 @@ func importChromium(ctx context.Context, options BrowserImportOptions) ([]Import
 			path := filepath.Join(options.Output, id, storageFileName)
 			absPath, err := filepath.Abs(path)
 			if err != nil {
-				return nil, 0, fmt.Errorf("解析认证状态路径: %w", err)
+				initialFailures = append(initialFailures, ImportFailure{Target: targetLabel, Error: fmt.Sprintf("解析认证状态路径: %v", err)})
+				continue
 			}
 			language, _ := readProfileLanguage(root, account.Profile)
 			if language == "" {
@@ -347,11 +381,13 @@ func importChromium(ctx context.Context, options BrowserImportOptions) ([]Import
 
 		result, err := importChromiumAccount(ctx, account, options, proxyURL, requestProxy, masterKey)
 		if err != nil {
-			return nil, 0, fmt.Errorf("导入 %s: %w", account.Email, err)
+			initialFailures = append(initialFailures, ImportFailure{Target: targetLabel, Error: err.Error()})
+			continue
 		}
 		pending = append(pending, result)
 	}
-	return validateAndWriteImports(ctx, pending)
+	succeeded, failures, models, err := validateAndWriteImports(ctx, pending, initialFailures)
+	return ImportBrowserResult{Results: succeeded, Failures: failures, Models: models}, err
 }
 
 func selectAccounts(accounts []Account, profiles []string, emails []string, targets []string) ([]Account, error) {
@@ -566,10 +602,18 @@ func importChromiumAccount(ctx context.Context, account Account, options Browser
 	}, nil
 }
 
-func validateAndWriteImports(ctx context.Context, pending []pendingImport) ([]ImportResult, int, error) {
+func validateAndWriteImports(ctx context.Context, pending []pendingImport, initialFailures []ImportFailure) ([]ImportResult, []ImportFailure, int, error) {
 	models := make(map[string]struct{})
+	failures := append([]ImportFailure(nil), initialFailures...)
+	var succeeded []ImportResult
+	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
+
 	for index := range pending {
 		item := &pending[index]
+		targetLabel := item.result.Email
+		if targetLabel == "" {
+			targetLabel = item.result.Profile
+		}
 		source := gemini.AccountSource{
 			ID: item.state.Metadata.ID, Cookies: stateCookiesToGemini(item.state.Cookies),
 			Language: item.state.Metadata.Language, AuthUser: item.state.Metadata.AuthUser,
@@ -580,7 +624,8 @@ func validateAndWriteImports(ctx context.Context, pending []pendingImport) ([]Im
 		}
 		client, err := gemini.NewClient(source, item.requestProxy, false)
 		if err != nil {
-			return nil, 0, fmt.Errorf("验证账号 %s: %w", item.state.Metadata.ID, err)
+			failures = append(failures, ImportFailure{Target: targetLabel, Error: err.Error()})
+			continue
 		}
 		accountContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err = client.Init(accountContext)
@@ -598,26 +643,30 @@ func validateAndWriteImports(ctx context.Context, pending []pendingImport) ([]Im
 		cancel()
 		client.CloseIdleConnections()
 		if err != nil {
-			return nil, 0, fmt.Errorf("验证账号 %s: %w", item.state.Metadata.ID, err)
+			failures = append(failures, ImportFailure{Target: targetLabel, Error: err.Error()})
+			continue
 		}
 		for _, model := range client.Models() {
 			models[model.ID] = struct{}{}
 		}
-	}
-	results := make([]ImportResult, len(pending))
-	completedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	for index := range pending {
-		file, err := auth.New(pending[index].result.Path, pending[index].state)
+
+		file, err := auth.New(item.result.Path, item.state)
 		if err != nil {
-			return nil, 0, err
+			failures = append(failures, ImportFailure{Target: targetLabel, Error: err.Error()})
+			continue
 		}
 		if err := file.Write(); err != nil {
-			return nil, 0, err
+			failures = append(failures, ImportFailure{Target: targetLabel, Error: err.Error()})
+			continue
 		}
-		pending[index].result.CompletedAt = completedAt
-		results[index] = pending[index].result
+		item.result.CompletedAt = completedAt
+		succeeded = append(succeeded, item.result)
 	}
-	return results, len(models), nil
+
+	if len(succeeded) == 0 && len(failures) > 0 {
+		return nil, failures, 0, fmt.Errorf("所选账号均验证失败: %s", failures[0].Error)
+	}
+	return succeeded, failures, len(models), nil
 }
 
 // AccountID 返回邮箱对应的账号 ID

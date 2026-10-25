@@ -13,7 +13,7 @@ import { ErrorState, Loading } from '@/components/ui/states'
 import { toast } from '@/components/ui/toast'
 import { importMessages } from '@/features/accounts/messages'
 import { accountsKey } from '@/features/accounts/queries'
-import type { BrowserProfiles, BrowserType, PairingToken } from '@/features/accounts/types'
+import type { BrowserProfiles, BrowserType, ImportBrowserResponse, PairingToken } from '@/features/accounts/types'
 import { api } from '@/lib/api'
 import { formatDateTime } from '@/lib/format'
 import { fill, useI18n, useMessages } from '@/lib/i18n'
@@ -39,15 +39,33 @@ function BrowserImport() {
   })
   const run = useMutation({
     mutationFn: () =>
-      api('/api/accounts/import/browser', {
+      api<ImportBrowserResponse>('/api/accounts/import/browser', {
         method: 'POST',
         json: { browser, targets: selected, emails: selected, proxy },
       }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       void client.invalidateQueries({ queryKey: accountsKey })
       void profiles.refetch()
-      toast({ tone: 'success', title: m.importDone })
-      setSelected([])
+      const importedTargets = new Set(data.accounts.map((a) => a.email ?? a.account_id))
+      setSelected((current) => current.filter((target) => !importedTargets.has(target)))
+
+      const failureCount = data.failures?.length ?? 0
+      const successCount = data.accounts.length
+
+      if (failureCount > 0 && successCount > 0) {
+        toast({
+          tone: 'warning',
+          title: fill(m.importPartial, { succeeded: successCount, failed: failureCount }),
+          description: data.failures?.map((f) => `${f.target} (${f.error})`).join('; '),
+        })
+      } else if (failureCount > 0 && successCount === 0) {
+        toast({
+          tone: 'error',
+          title: data.failures?.[0]?.error ?? m.readFailed,
+        })
+      } else {
+        toast({ tone: 'success', title: m.importDone })
+      }
     },
     onError: (error) => {
       toast({ tone: 'error', title: error.message })
