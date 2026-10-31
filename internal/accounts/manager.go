@@ -80,6 +80,10 @@ func New(ctx context.Context, pool *balancer.AccountPool, settings Settings) *Ma
 		proxies: proxypool.New(config.SplitList(settings.Proxy)), proxyCheck: make(chan struct{}, 1),
 	}
 	pool.OnTransportError(manager.requestProxyCheck)
+	pool.OnProxyBlocked(manager.MarkProxyBlocked)
+	pool.SetReconnector(func(ctx context.Context, accountID string) error {
+		return manager.Verify(accountID)
+	})
 	return manager
 }
 
@@ -514,8 +518,16 @@ func (m *Manager) Verify(accountID string) error {
 		return fmt.Errorf("账号 %q 已停用", accountID)
 	}
 	logging.Info(accountID, "账号重新验证")
-	if entry.account.OAuth == nil && entry.account.Browser != "" && entry.account.Profile != "" {
+	if entry.account.OAuth != nil {
+		if cookies, err := newChromeRenewal(entry.account).refresh(m.ctx); err == nil && len(cookies) > 0 {
+			entry.account.Source.Cookies = cookies
+		}
+	} else if entry.account.Browser != "" && entry.account.Profile != "" {
 		if cookies, err := newBrowserRenewal(entry.account).refresh(m.ctx); err == nil && len(cookies) > 0 {
+			entry.account.Source.Cookies = cookies
+		}
+	} else if entry.account.File != nil {
+		if cookies := entry.account.File.Cookies(); len(cookies) > 0 {
 			entry.account.Source.Cookies = cookies
 		}
 	}

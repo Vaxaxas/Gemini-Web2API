@@ -255,6 +255,13 @@ func (f *File) SetOAuth(material OAuthMaterial, profile string) error {
 	return f.writeLocked()
 }
 
+// Cookies 返回当前保存的 Cookie 副本
+func (f *File) Cookies() []gemini.Cookie {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return toGeminiCookies(f.state.Cookies)
+}
+
 // SaveCookies 更新 Cookie 并原子写回认证状态
 func (f *File) SaveCookies(cookies []gemini.Cookie) error {
 	f.mu.Lock()

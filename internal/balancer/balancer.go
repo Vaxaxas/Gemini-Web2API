@@ -150,6 +150,8 @@ type AccountPool struct {
 	lastSessionGC time.Time
 	mu            sync.Mutex
 	transport     func()
+	proxyBlocked  func(proxyURL string, err error)
+	reconnect     func(ctx context.Context, accountID string) error
 	// changed 在账号状态、冷却或请求槽变化时关闭并替换，唤醒等待账号的请求
 	changed chan struct{}
 	// queues 为按排队键分组、按到达顺序排列的等待请求唤醒通道
@@ -331,6 +333,9 @@ func (p *AccountPool) MarkFailed(accountID string, err error) bool {
 		state = StateAuthRequired
 	}
 	p.reportTransport(err)
+	if errors.Is(err, gemini.ErrCaptcha) && entry.Info.ProxySource == "pool" {
+		p.reportProxyBlocked(entry.Info.Proxy, err)
+	}
 	changed := entry.State != state || entry.LastError != errorText(err)
 	entry.State = state
 	entry.LastError, entry.LastErrorAt = errorText(err), time.Now()
@@ -353,6 +358,38 @@ func (p *AccountPool) OnTransportError(fn func()) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.transport = fn
+}
+
+// OnProxyBlocked 设置账号遭遇 Google 人机验证拦截时调用的函数
+func (p *AccountPool) OnProxyBlocked(fn func(proxyURL string, err error)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.proxyBlocked = fn
+}
+
+// SetReconnector 设置账号遇到认证失效时自动重新连接并初始化的函数
+func (p *AccountPool) SetReconnector(fn func(ctx context.Context, accountID string) error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reconnect = fn
+}
+
+// Reconnect 调用已设置的重新连接函数为指定账号重新连接并初始化
+func (p *AccountPool) Reconnect(ctx context.Context, accountID string) error {
+	p.mu.Lock()
+	fn := p.reconnect
+	p.mu.Unlock()
+	if fn == nil {
+		return errors.New("未配置重新连接器")
+	}
+	return fn(ctx, accountID)
+}
+
+// reportProxyBlocked 在代理遭 Google 人机验证拦截时通知外部
+func (p *AccountPool) reportProxyBlocked(proxyURL string, err error) {
+	if p.proxyBlocked != nil && proxyURL != "" {
+		p.proxyBlocked(proxyURL, err)
+	}
 }
 
 // reportTransport 在 err 为连接、TLS 或代理错误时调用 OnTransportError 设置的函数，调用方持有 p.mu
@@ -614,6 +651,9 @@ func (p *AccountPool) ReportFailure(accountID string, modelID string, err error)
 		return
 	}
 	entry.ConsecutiveFails++
+	if errors.Is(err, gemini.ErrCaptcha) && entry.Info.ProxySource == "pool" {
+		p.reportProxyBlocked(entry.Info.Proxy, err)
+	}
 	if gemini.IsAuthenticationError(err) {
 		entry.State = StateAuthRequired
 		logging.Warn(accountID, "账号待认证", "原因", err)

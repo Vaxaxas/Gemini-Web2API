@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { ErrorState, Loading } from '@/components/ui/states'
 import { toast } from '@/components/ui/toast'
 import { importMessages } from '@/features/accounts/messages'
+import { ProxyInput } from '@/features/accounts/ProxyInput'
 import { accountsKey } from '@/features/accounts/queries'
 import type { BrowserProfiles, BrowserType, ImportBrowserResponse, PairingToken } from '@/features/accounts/types'
 import { api } from '@/lib/api'
@@ -37,6 +38,30 @@ function BrowserImport() {
     queryKey: ['browser-profiles', browser],
     queryFn: () => api<BrowserProfiles>(`/api/accounts/import/browser?browser=${browser}`),
   })
+  const items = profiles.data?.profiles ?? []
+
+  const emailCounts = items.reduce<Record<string, number>>((acc, p) => {
+    if (p.email) acc[p.email] = (acc[p.email] ?? 0) + 1
+    return acc
+  }, {})
+
+  const profileTarget = (p: { email?: string; profile: string }) => {
+    if (p.email && (emailCounts[p.email] ?? 0) > 1) {
+      return `${p.profile}/${p.email}`
+    }
+    return p.email || p.profile
+  }
+
+  useEffect(() => {
+    if (profiles.data?.profiles) {
+      const unselectable = new Set(
+        profiles.data.profiles
+          .filter((p) => !p.importable || p.imported)
+          .map((p) => profileTarget(p)),
+      )
+      setSelected((current) => current.filter((target) => !unselectable.has(target)))
+    }
+  }, [profiles.data])
   const run = useMutation({
     mutationFn: () =>
       api<ImportBrowserResponse>('/api/accounts/import/browser', {
@@ -47,28 +72,41 @@ function BrowserImport() {
       void client.invalidateQueries({ queryKey: accountsKey })
       void profiles.refetch()
       const importedTargets = new Set(data.accounts.map((a) => a.email ?? a.account_id))
-      setSelected((current) => current.filter((target) => !importedTargets.has(target)))
+      setSelected((current) =>
+        current.filter((target) => {
+          const email = target.includes('/') ? target.split('/')[1] : target
+          return !importedTargets.has(target) && !importedTargets.has(email)
+        }),
+      )
 
       const failureCount = data.failures?.length ?? 0
       const successCount = data.accounts.length
 
       if (failureCount > 0 && successCount > 0) {
-        toast({
-          tone: 'warning',
-          title: fill(m.importPartial, { succeeded: successCount, failed: failureCount }),
-          description: data.failures?.map((f) => `${f.target} (${f.error})`).join('; '),
-        })
-      } else if (failureCount > 0 && successCount === 0) {
+        const details = data.failures?.map((f) => `${f.target} (${f.error})`).join('; ')
         toast({
           tone: 'error',
-          title: data.failures?.[0]?.error ?? m.readFailed,
+          title: details
+            ? `${fill(m.importPartial, { succeeded: successCount, failed: failureCount })}：${details}`
+            : fill(m.importPartial, { succeeded: successCount, failed: failureCount }),
+        })
+      } else if (failureCount > 0 && successCount === 0) {
+        const rawErr = data.failures?.[0]?.error ?? m.readFailed
+        const isCaptcha = rawErr.includes('人机验证') || rawErr.includes('sorry/index')
+        toast({
+          tone: 'error',
+          title: isCaptcha ? `${m.captchaBlockedTitle}：${m.captchaBlockedHint}` : rawErr,
         })
       } else {
         toast({ tone: 'success', title: m.importDone })
       }
     },
     onError: (error) => {
-      toast({ tone: 'error', title: error.message })
+      const isCaptcha = error.message.includes('人机验证') || error.message.includes('sorry/index')
+      toast({
+        tone: 'error',
+        title: isCaptcha ? `${m.captchaBlockedTitle}：${m.captchaBlockedHint}` : error.message,
+      })
     },
   })
   const toggle = (target: string) => {
@@ -76,7 +114,6 @@ function BrowserImport() {
       current.includes(target) ? current.filter((item) => item !== target) : [...current, target],
     )
   }
-  const items = profiles.data?.profiles ?? []
   return (
     <Section title={m.browserTitle} description={m.browserHint}>
       <div className="flex flex-col gap-4">
@@ -103,17 +140,20 @@ function BrowserImport() {
         ) : (
           <ul className="-mx-5 -mt-2 flex flex-col divide-y divide-border border-b border-border">
             {items.map((profile) => {
-              const target = profile.email || profile.profile
+              const target = profileTarget(profile)
+              const isSelectable = profile.importable && !profile.imported
               return (
                 <li key={`${profile.profile}/${profile.email}/${profile.auth_user ?? 0}`}>
-                  <label className="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-hover has-disabled:cursor-default has-disabled:opacity-70">
+                  <label className="flex cursor-pointer items-center gap-3 px-5 py-3 hover:bg-hover has-disabled:cursor-not-allowed has-disabled:opacity-60">
                     <input
                       type="checkbox"
                       className="size-4 accent-primary"
                       checked={selected.includes(target)}
-                      disabled={!profile.importable}
+                      disabled={!isSelectable}
                       onChange={() => {
-                        toggle(target)
+                        if (isSelectable) {
+                          toggle(target)
+                        }
                       }}
                     />
                     <span className="flex min-w-0 flex-1 flex-col">
@@ -162,13 +202,12 @@ function BrowserImport() {
           </ul>
         )}
         <Field id="browser-proxy" label={m.proxy} description={m.proxyHint}>
-          <Input
+          <ProxyInput
             id="browser-proxy"
             value={proxy}
+            testLabel={m.testProxy}
             placeholder="http://127.0.0.1:7890"
-            onChange={(event) => {
-              setProxy(event.target.value)
-            }}
+            onChange={setProxy}
           />
         </Field>
         <div>
@@ -207,7 +246,11 @@ function CookieImport() {
       setCookies('')
     },
     onError: (error) => {
-      toast({ tone: 'error', title: error.message })
+      const isCaptcha = error.message.includes('人机验证') || error.message.includes('sorry/index')
+      toast({
+        tone: 'error',
+        title: isCaptcha ? `${m.captchaBlockedTitle}：${m.captchaBlockedHint}` : error.message,
+      })
     },
   })
   return (
@@ -245,13 +288,12 @@ function CookieImport() {
         />
       </Field>
       <Field id="cookie-proxy" label={m.proxy} description={m.proxyHint}>
-        <Input
+        <ProxyInput
           id="cookie-proxy"
           value={proxy}
+          testLabel={m.testProxy}
           placeholder="http://127.0.0.1:7890"
-          onChange={(event) => {
-            setProxy(event.target.value)
-          }}
+          onChange={setProxy}
         />
       </Field>
       <div>

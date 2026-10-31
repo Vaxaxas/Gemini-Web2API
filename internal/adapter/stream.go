@@ -259,6 +259,7 @@ func runGenerationAttempts(
 	usedRequestAttempts := 0
 	lastAccountID := ""
 	var lastErr error
+	reconnectedAccounts := make(map[string]bool)
 	for len(excludedAccountIDs) < availableAccounts {
 		selectionKey := sessionKey
 		if newSession {
@@ -282,6 +283,7 @@ func runGenerationAttempts(
 			}
 			return generationResult{}, accountID, &gemini.ProtocolError{HTTPStatus: 503, Message: "没有可用账号", Retryable: true}
 		}
+		reconnected := false
 		result, err := func() (generationResult, error) {
 			defer releaseRequest()
 			result, err := runGenerationWithClient(
@@ -290,7 +292,13 @@ func runGenerationAttempts(
 			)
 			if err == nil {
 				pool.ReportSuccess(accountID, requestedModel)
-			} else if ctx.Err() == nil && retryableAccountError(err) && !isOutputMismatchError(err) {
+				return result, nil
+			}
+			if ctx.Err() == nil && retryableAccountError(err) && !isOutputMismatchError(err) {
+				if gemini.IsAuthenticationError(err) && (hasVisibleOutput == nil || !hasVisibleOutput()) && !reconnectedAccounts[accountID] {
+					reconnected = true
+					return result, err
+				}
 				if usageLimitError(err) {
 					_, _ = client.FetchUsage(ctx)
 				}
@@ -306,6 +314,21 @@ func runGenerationAttempts(
 		lastAccountID = accountID
 		if ctx.Err() != nil {
 			return generationResult{}, accountID, err
+		}
+		if reconnected {
+			reconnectedAccounts[accountID] = true
+			trace.Stage("会话失效，自动重新连接", "账号", accountID)
+			logging.Info(accountID, "检测到账号会话失效，尝试自动重新连接一次")
+			reconnectErr := pool.Reconnect(ctx, accountID)
+			if reconnectErr == nil {
+				logging.Info(accountID, "自动重新连接成功，无感重试当前请求")
+				trace.Stage("自动重新连接成功，重试请求", "账号", accountID)
+				delete(excludedAccountIDs, accountID)
+				continue
+			}
+			logging.Warn(accountID, "自动重新连接失败，恢复原错误", "错误", reconnectErr)
+			trace.Stage("自动重新连接失败", "账号", accountID, "错误", reconnectErr)
+			pool.ReportFailure(accountID, requestedModel, err)
 		}
 		if errors.Is(err, gemini.ErrConversationLost) && rebuildable && !newSession && (hasVisibleOutput == nil || !hasVisibleOutput()) {
 			trace.AttemptFailed(accountID, upstreamStatus(err), err, true)

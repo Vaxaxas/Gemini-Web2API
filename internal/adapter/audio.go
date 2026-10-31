@@ -103,16 +103,33 @@ func SpeechHandler(pool *balancer.AccountPool) gin.HandlerFunc {
 		}
 		audio, err := client.Speech(c.Request.Context(), request.Input, "", upstreamFormat)
 		err = cancelledError(c.Request.Context(), err)
+		if err != nil && gemini.IsAuthenticationError(err) {
+			release()
+			release = nil
+			logging.Info(accountID, "语音生成会话失效，尝试自动重新连接一次")
+			if rErr := pool.Reconnect(c.Request.Context(), accountID); rErr == nil {
+				logging.Info(accountID, "自动重新连接成功，重试语音生成")
+				var newRelease func()
+				client, accountID, newRelease, err = pool.AcquireForModel(c.Request.Context(), "", modelID, nil)
+				if err == nil && client != nil {
+					release = newRelease
+					audio, err = client.Speech(c.Request.Context(), request.Input, "", upstreamFormat)
+					err = cancelledError(c.Request.Context(), err)
+				}
+			}
+		}
+		if release != nil {
+			release()
+			release = nil
+		}
 		if err != nil {
 			if retryableAccountError(err) {
 				pool.ReportFailure(accountID, modelID, err)
 			}
-			release()
 			writeOpenAIError(c, upstreamStatus(err), openAIUpstreamCode(err), err.Error())
 			return
 		}
 		pool.ReportSuccess(accountID, modelID)
-		release()
 		contentType := audioContentTypes[format]
 		if upstreamFormat == gemini.SpeechMP3 {
 			if audio, contentType, err = transcodeMP3(audio, format); err != nil {

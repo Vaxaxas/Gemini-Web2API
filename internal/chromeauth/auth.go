@@ -421,15 +421,20 @@ func selectAccounts(accounts []Account, profiles []string, emails []string, targ
 	for _, account := range accounts {
 		profile := strings.ToLower(strings.TrimSpace(account.Profile))
 		email := strings.ToLower(strings.TrimSpace(account.Email))
+		combo := profile + "/" + email
 		_, profileMatch := requestedProfiles[profile]
 		_, emailMatch := requestedEmails[email]
 		_, targetMatchProfile := requestedTargets[profile]
 		_, targetMatchEmail := requestedTargets[email]
+		_, targetMatchCombo := requestedTargets[combo]
 
 		matched := false
 		if len(requestedTargets) > 0 {
-			if targetMatchProfile || targetMatchEmail {
+			if targetMatchCombo || targetMatchProfile || targetMatchEmail {
 				matched = true
+				if targetMatchCombo {
+					foundTargets[combo] = struct{}{}
+				}
 				if targetMatchProfile {
 					foundTargets[profile] = struct{}{}
 				}

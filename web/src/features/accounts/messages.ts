@@ -182,6 +182,7 @@ export const accountsMessages = defineMessages({
     runtimeInfo: '运行状态',
     proxyTitle: '修改代理',
     proxyHint: '留空时从代理池分配，填 direct 表示直连；支持 http、https、socks4、socks5',
+    testProxy: '测试连接',
     direct: '直连',
     proxySourceFixed: '固定',
     proxySourcePool: '代理池',
@@ -199,6 +200,11 @@ export const accountsMessages = defineMessages({
     setProxy: '设置代理',
     batchProxyTitle: '为 {count} 个账号设置代理',
     batchProxyTitleOne: '为 {count} 个账号设置代理',
+    batchDelete: '删除账号',
+    batchDeleteTitle: '删除 {count} 个账号',
+    batchDeleteTitleOne: '删除 {count} 个账号',
+    batchDeleteHint: '删除后会移除本机的认证文件，需要重新导入。确定删除所选的 {count} 个账号？',
+    batchDeleteHintOne: '删除后会移除本机的认证文件，需要重新导入。确定删除所选的 {count} 个账号？',
     clearSelection: '取消选择',
     batchResult: '{action}：成功 {succeeded} 个，失败 {failed} 个',
     batchFailures: '{result}。失败项：{items}',
@@ -259,6 +265,7 @@ export const accountsMessages = defineMessages({
     runtimeInfo: '執行狀態',
     proxyTitle: '修改代理',
     proxyHint: '留空時從代理池分配，填 direct 表示直連；支援 http、https、socks4、socks5',
+    testProxy: '測試連線',
     direct: '直連',
     proxySourceFixed: '固定',
     proxySourcePool: '代理池',
@@ -276,6 +283,11 @@ export const accountsMessages = defineMessages({
     setProxy: '設定代理',
     batchProxyTitle: '為 {count} 個帳號設定代理',
     batchProxyTitleOne: '為 {count} 個帳號設定代理',
+    batchDelete: '刪除帳號',
+    batchDeleteTitle: '刪除 {count} 個帳號',
+    batchDeleteTitleOne: '刪除 {count} 個帳號',
+    batchDeleteHint: '刪除後會移除本機的認證檔案，需要重新匯入。確定刪除所選取的 {count} 個帳號？',
+    batchDeleteHintOne: '刪除後會移除本機的認證檔案，需要重新匯入。確定刪除所選取的 {count} 個帳號？',
     clearSelection: '取消選擇',
     batchResult: '{action}：成功 {succeeded} 個，失敗 {failed} 個',
     batchFailures: '{result}。失敗項目：{items}',
@@ -338,6 +350,7 @@ export const accountsMessages = defineMessages({
     proxyTitle: 'Edit proxy',
     proxyHint:
       'Leave empty to use the proxy pool, or enter direct to connect without a proxy; http, https, socks4 and socks5',
+    testProxy: 'Test',
     direct: 'Direct',
     proxySourceFixed: 'Fixed',
     proxySourcePool: 'Pool',
@@ -355,6 +368,13 @@ export const accountsMessages = defineMessages({
     setProxy: 'Set proxy',
     batchProxyTitle: 'Set proxy for {count} accounts',
     batchProxyTitleOne: 'Set proxy for {count} account',
+    batchDelete: 'Delete accounts',
+    batchDeleteTitle: 'Delete {count} accounts',
+    batchDeleteTitleOne: 'Delete {count} account',
+    batchDeleteHint:
+      'Deletion removes the local auth files and requires re-import. Delete {count} selected accounts?',
+    batchDeleteHintOne:
+      'Deletion removes the local auth file and requires re-import. Delete {count} selected account?',
     clearSelection: 'Clear selection',
     batchResult: '{action}: {succeeded} succeeded, {failed} failed',
     batchFailures: '{result}. Failed: {items}',
@@ -417,6 +437,7 @@ export const accountsMessages = defineMessages({
     proxyTitle: 'プロキシを変更',
     proxyHint:
       '空欄の場合はプロキシプールから割り当て、direct と入力すると直接接続します。http、https、socks4、socks5 に対応',
+    testProxy: '接続テスト',
     direct: '直接接続',
     proxySourceFixed: '固定',
     proxySourcePool: 'プール',
@@ -435,6 +456,13 @@ export const accountsMessages = defineMessages({
     setProxy: 'プロキシを設定',
     batchProxyTitle: '{count} 件のアカウントにプロキシを設定',
     batchProxyTitleOne: '{count} 件のアカウントにプロキシを設定',
+    batchDelete: 'アカウントを削除',
+    batchDeleteTitle: '{count} 件のアカウントを削除',
+    batchDeleteTitleOne: '{count} 件のアカウントを削除',
+    batchDeleteHint:
+      '削除するとローカルの認証ファイルが消え、再インポートが必要です。選択した {count} 件のアカウントを削除しますか？',
+    batchDeleteHintOne:
+      '削除するとローカルの認証ファイルが消え、再インポートが必要です。選択した {count} 件のアカウントを削除しますか？',
     clearSelection: '選択を解除',
     batchResult: '{action}：成功 {succeeded} 件、失敗 {failed} 件',
     batchFailures: '{result}。失敗：{items}',
@@ -497,6 +525,7 @@ export const accountsMessages = defineMessages({
     proxyTitle: '프록시 수정',
     proxyHint:
       '비워 두면 프록시 풀에서 할당하고, direct를 입력하면 직접 연결합니다. http, https, socks4, socks5 지원',
+    testProxy: '연결 테스트',
     direct: '직접 연결',
     proxySourceFixed: '고정',
     proxySourcePool: '프록시 풀',
@@ -514,6 +543,13 @@ export const accountsMessages = defineMessages({
     setProxy: '프록시 설정',
     batchProxyTitle: '계정 {count}개에 프록시 설정',
     batchProxyTitleOne: '계정 {count}개에 프록시 설정',
+    batchDelete: '계정 삭제',
+    batchDeleteTitle: '계정 {count}개 삭제',
+    batchDeleteTitleOne: '계정 {count}개 삭제',
+    batchDeleteHint:
+      '삭제하면 로컬 인증 파일이 제거되어 다시 가져와야 합니다. 선택한 계정 {count}개를 삭제할까요?',
+    batchDeleteHintOne:
+      '삭제하면 로컬 인증 파일이 제거되어 다시 가져와야 합니다. 선택한 계정 {count}개를 삭제할까요?',
     clearSelection: '선택 해제',
     batchResult: '{action}: 성공 {succeeded}개, 실패 {failed}개',
     batchFailures: '{result}. 실패: {items}',
@@ -576,6 +612,7 @@ export const accountsMessages = defineMessages({
     proxyTitle: 'Modifier le proxy',
     proxyHint:
       'Laissez vide pour utiliser le pool de proxys, ou saisissez direct pour une connexion directe ; http, https, socks4 et socks5',
+    testProxy: 'Tester',
     direct: 'Direct',
     proxySourceFixed: 'Fixe',
     proxySourcePool: 'Pool',
@@ -594,6 +631,13 @@ export const accountsMessages = defineMessages({
     setProxy: 'Définir le proxy',
     batchProxyTitle: 'Définir le proxy de {count} comptes',
     batchProxyTitleOne: 'Définir le proxy de {count} compte',
+    batchDelete: 'Supprimer les comptes',
+    batchDeleteTitle: 'Supprimer {count} comptes',
+    batchDeleteTitleOne: 'Supprimer {count} compte',
+    batchDeleteHint:
+      'La suppression efface les fichiers d’authentification locaux et impose une nouvelle importation. Supprimer les {count} comptes sélectionnés ?',
+    batchDeleteHintOne:
+      'La suppression efface le fichier d’authentification local et impose une nouvelle importation. Supprimer le compte sélectionné ?',
     clearSelection: 'Désélectionner',
     batchResult: '{action} — réussis : {succeeded}, échecs : {failed}',
     batchFailures: '{result}. Échecs : {items}',
@@ -656,6 +700,7 @@ export const accountsMessages = defineMessages({
     proxyTitle: 'Proxy ändern',
     proxyHint:
       'Leer lassen für den Proxy-Pool, direct für eine direkte Verbindung; http, https, socks4 und socks5',
+    testProxy: 'Testen',
     direct: 'Direkt',
     proxySourceFixed: 'Fest',
     proxySourcePool: 'Pool',
@@ -674,6 +719,13 @@ export const accountsMessages = defineMessages({
     setProxy: 'Proxy festlegen',
     batchProxyTitle: 'Proxy für {count} Konten festlegen',
     batchProxyTitleOne: 'Proxy für {count} Konto festlegen',
+    batchDelete: 'Konten löschen',
+    batchDeleteTitle: '{count} Konten löschen',
+    batchDeleteTitleOne: '{count} Konto löschen',
+    batchDeleteHint:
+      'Beim Löschen werden die lokalen Authentifizierungsdateien entfernt; danach ist ein erneuter Import nötig. Die ausgewählten {count} Konten löschen?',
+    batchDeleteHintOne:
+      'Beim Löschen wird die lokale Authentifizierungsdatei entfernt; danach ist ein erneuter Import nötig. Das ausgewählte {count} Konto löschen?',
     clearSelection: 'Auswahl aufheben',
     batchResult: '{action}: {succeeded} erfolgreich, {failed} fehlgeschlagen',
     batchFailures: '{result}. Fehlgeschlagen: {items}',
@@ -712,6 +764,12 @@ export const importMessages = defineMessages({
       '浏览器登录多个 Google 账号时，填官网地址 gemini.google.com/u/N/app 中的 N；只登录一个账号时为 0',
     proxy: '代理',
     proxyHint: '留空时从代理池分配；填写后作为该账号的固定代理，填 direct 表示直连',
+    testProxy: '测试连接',
+    captchaBlockedTitle: '导入失败：出口 IP 遭 Google 人机验证拦截',
+    captchaBlockedHint:
+      '当前出口 IP 被 Google 判定为异常流量（302 重定向到 sorry/index）。建议在“代理”填入可用的 SOCKS5/HTTP 代理，或在“设置”页配置代理池后重试。',
+    captchaDiagnosticHint:
+      'Google 判定为异常流量并下发了人机验证（HTTP 302）。建议更换其他地区节点或使用干净的家宽代理。',
     importCookie: '导入',
     importDone: '导入完成',
     importPartial: '成功导入 {succeeded} 个，失败 {failed} 个',
@@ -755,6 +813,12 @@ export const importMessages = defineMessages({
       '瀏覽器登入多個 Google 帳號時，填官網網址 gemini.google.com/u/N/app 中的 N；只登入一個帳號時為 0',
     proxy: '代理',
     proxyHint: '留空時從代理池分配；填寫後作為該帳號的固定代理，填 direct 表示直連',
+    testProxy: '測試連線',
+    captchaBlockedTitle: '匯入失敗：出口 IP 遭 Google 人機驗證攔截',
+    captchaBlockedHint:
+      '目前網路出口 IP 被 Google 風控判定為異常流量（302 重定向到 sorry/index）。建議在下方「代理」填入可用之 SOCKS5/HTTP 代理，或至「設定」頁面配置代理池後重試。',
+    captchaDiagnosticHint:
+      'Google 判定為異常流量並下發了人機驗證（HTTP 302）。建議更換其他地區節點或使用乾淨的家寬代理。',
     importCookie: '匯入',
     importDone: '匯入完成',
     importPartial: '成功匯入 {succeeded} 個，失敗 {failed} 個',
@@ -799,6 +863,12 @@ export const importMessages = defineMessages({
     proxy: 'Proxy',
     proxyHint:
       'Leave empty to use the proxy pool; a value becomes this account’s fixed proxy, and direct connects without a proxy',
+    testProxy: 'Test',
+    captchaBlockedTitle: 'Import Failed: Blocked by Google Captcha',
+    captchaBlockedHint:
+      'Your outbound IP was flagged by Google (HTTP 302 redirect to sorry/index). Please enter a valid SOCKS5/HTTP proxy below, or configure the proxy pool in Settings.',
+    captchaDiagnosticHint:
+      'Google flagged this IP as suspicious traffic (HTTP 302). Please switch to another node or use a clean residential proxy.',
     importCookie: 'Import',
     importDone: 'Import complete',
     importPartial: '{succeeded} succeeded, {failed} failed',
@@ -844,6 +914,12 @@ export const importMessages = defineMessages({
     proxy: 'プロキシ',
     proxyHint:
       '空欄の場合はプロキシプールから割り当てます。入力するとこのアカウントの固定プロキシになり、direct で直接接続します',
+    testProxy: '接続テスト',
+    captchaBlockedTitle: 'インポート失敗：Google Captcha による制限',
+    captchaBlockedHint:
+      '現在の送信元 IP が Google に検出されました（302 sorry/index）。プロキシを入力するか、設定ページでプロキシプールを設定してください。',
+    captchaDiagnosticHint:
+      'Google により異常なトラフィックと判定され、Captcha（HTTP 302）が返されました。別のノードに変更してください。',
     importCookie: 'インポート',
     importDone: 'インポートしました',
     importPartial: '{succeeded} 件のインポートに成功、{failed} 件が失敗',
@@ -888,6 +964,12 @@ export const importMessages = defineMessages({
     proxy: '프록시',
     proxyHint:
       '비워 두면 프록시 풀에서 할당합니다. 입력하면 이 계정의 고정 프록시가 되며, direct는 직접 연결합니다',
+    testProxy: '연결 테스트',
+    captchaBlockedTitle: '가져오기 실패: Google 보안 봇에 의해 차단됨',
+    captchaBlockedHint:
+      '현재 아웃바운드 IP가 Google에 의해 비정상 트래픽으로 감지되었습니다 (302 sorry/index). 프록시를 입력하거나 설정 페이지에서 프록시 풀을 구성하세요.',
+    captchaDiagnosticHint:
+      'Google이 비정상 트래픽으로 감지하여 Captcha(HTTP 302)를 보냈습니다. 다른 노드로 전환하세요.',
     importCookie: '가져오기',
     importDone: '가져오기 완료',
     importPartial: '{succeeded}개 가져오기 성공, {failed}개 실패',
@@ -933,6 +1015,12 @@ export const importMessages = defineMessages({
     proxy: 'Proxy',
     proxyHint:
       'Laissez vide pour utiliser le pool de proxys ; une valeur devient le proxy fixe de ce compte, direct pour une connexion directe',
+    testProxy: 'Tester',
+    captchaBlockedTitle: 'Échec de l’importation : Bloqué par Google Captcha',
+    captchaBlockedHint:
+      'Votre adresse IP de sortie a été bloquée par Google (HTTP 302 sorry/index). Veuillez entrer un proxy SOCKS5/HTTP ou configurer le pool de proxys.',
+    captchaDiagnosticHint:
+      'Google a signalé cette adresse IP comme suspecte (HTTP 302). Veuillez changer de nœud proxy.',
     importCookie: 'Importer',
     importDone: 'Importation terminée',
     importPartial: '{succeeded} importés avec succès, {failed} échoués',
@@ -978,6 +1066,12 @@ export const importMessages = defineMessages({
     proxy: 'Proxy',
     proxyHint:
       'Leer lassen für den Proxy-Pool; ein Wert wird zum festen Proxy dieses Kontos, direct für eine direkte Verbindung',
+    testProxy: 'Testen',
+    captchaBlockedTitle: 'Import fehlgeschlagen: Von Google Captcha blockiert',
+    captchaBlockedHint:
+      'Ihre ausgehende IP-Adresse wurde von Google blockiert (HTTP 302 sorry/index). Bitte geben Sie einen SOCKS5/HTTP-Proxy an oder konfigurieren Sie den Proxy-Pool.',
+    captchaDiagnosticHint:
+      'Google hat diese IP als verdächtigen Datenverkehr markiert (HTTP 302). Bitte wechseln Sie den Proxy-Knoten.',
     importCookie: 'Importieren',
     importDone: 'Import abgeschlossen',
     importPartial: '{succeeded} erfolgreich importiert, {failed} fehlgeschlagen',
