@@ -93,6 +93,18 @@ func (c *Client) CachedUsage() *UsageInfo {
 	return c.usage.Load()
 }
 
+// SetUsageForTest 供测试设置用量快照
+func (c *Client) SetUsageForTest(usage *UsageInfo) {
+	c.usage.Store(usage)
+}
+
+// SetBootstrapForTest 供测试设置运行参数
+func (c *Client) SetBootstrapForTest(bootstrap *Bootstrap) {
+	c.bootstrapMu.Lock()
+	defer c.bootstrapMu.Unlock()
+	c.bootstrap = bootstrap
+}
+
 // AcquireRequest 占用账号的一个请求槽直到完整上游请求链结束，后台生成的轮询阶段让出
 func (c *Client) AcquireRequest(ctx context.Context) (func(), error) {
 	c.busy.Add(1)

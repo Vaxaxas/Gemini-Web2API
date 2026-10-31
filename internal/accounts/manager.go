@@ -110,6 +110,7 @@ func (m *Manager) Start(accounts []auth.LoadedAccount) {
 	m.launchGuest(wait.Done)
 	wait.Wait()
 	go m.watchProxies()
+	go m.watchQuotas()
 }
 
 // guestReloadInterval 是访客会话重读首页与模型目录的间隔，与账号的默认轮换间隔相同
@@ -377,6 +378,64 @@ func catalogOf(client *gemini.Client) accountCatalog {
 		catalog.models = append(catalog.models, model.ID)
 	}
 	return catalog
+}
+
+// watchQuotas 定时检查各账号的用量重置时间，到期时自动向 Google 刷新用量
+func (m *Manager) watchQuotas() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.refreshDueQuotas()
+		}
+	}
+}
+
+// refreshDueQuotas 为配额重置时间已过或用量已耗尽的账号自动向 Google 刷新最新用量
+func (m *Manager) refreshDueQuotas() {
+	m.mu.Lock()
+	entries := make([]*managed, 0, len(m.accounts))
+	for _, entry := range m.accounts {
+		if entry != nil && !entry.account.Disabled {
+			entries = append(entries, entry)
+		}
+	}
+	m.mu.Unlock()
+
+	now := time.Now()
+	for _, entry := range entries {
+		client := m.pool.Client(entry.account.ID)
+		if client == nil {
+			continue
+		}
+		usage := client.CachedUsage()
+		shouldRefresh := false
+		if usage != nil {
+			if usage.Current != nil && usage.Current.UsedRatio >= 1 && now.After(usage.Current.ResetAt) {
+				shouldRefresh = true
+			}
+			if usage.Weekly != nil && usage.Weekly.UsedRatio >= 1 && now.After(usage.Weekly.ResetAt) {
+				shouldRefresh = true
+			}
+		}
+		if shouldRefresh {
+			accountID := entry.account.ID
+			go func(id string, c *gemini.Client) {
+				ctx, cancel := context.WithTimeout(m.ctx, 20*time.Second)
+				defer cancel()
+				newUsage, err := c.FetchUsage(ctx)
+				if err == nil {
+					logging.Info(id, "账号配额已到期自动刷新", "层级", newUsage.Tier)
+					if newUsage.Current != nil && newUsage.Current.UsedRatio < 1 {
+						_ = m.pool.ClearCooldown(id, "")
+					}
+				}
+			}(accountID, client)
+		}
+	}
 }
 
 // logCatalogChange 在账号层级或模型目录变化时写一行日志，列出新旧层级与增减的模型

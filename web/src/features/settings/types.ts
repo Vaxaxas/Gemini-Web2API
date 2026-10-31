@@ -3,6 +3,7 @@ export interface ServiceConfig {
   proxy_api_key: string
   proxy: string
   save_history: boolean
+  account_fallback: boolean
   model_mapping: string
   account_cooldown: string
   session_ttl: string
@@ -29,6 +30,7 @@ export type ConfigPatch = Partial<{
   proxy_api_key: string
   proxy: string
   save_history: boolean
+  account_fallback: boolean
   model_mapping: string
   account_cooldown: string
   session_ttl: string
